@@ -8,6 +8,7 @@ import (
 
 var ErrSessionNotFound = errors.New("session not found")
 var ErrGitContextNotFound = errors.New("git context not found")
+var ErrCommandOutputNotFound = errors.New("command output not found")
 
 func (s *Store) LatestSession() (SessionRecord, error) {
 	const query = `
@@ -243,4 +244,46 @@ ORDER BY occurred_at ASC;
 	}
 
 	return events, nil
+}
+
+func (s *Store) CommandOutputForCommandEvent(
+	commandEventID int64,
+) (CommandOutput, error) {
+	const query = `
+SELECT
+	command_event_id,
+	stdout,
+	stderr,
+	stdout_bytes,
+	stderr_bytes,
+	stdout_truncated,
+	stderr_truncated
+FROM command_output
+WHERE command_event_id = ?;
+`
+
+	var output CommandOutput
+
+	err := s.db.QueryRow(
+		query,
+		commandEventID,
+	).Scan(
+		&output.CommandEventID,
+		&output.Stdout,
+		&output.Stderr,
+		&output.StdoutBytes,
+		&output.StderrBytes,
+		&output.StdoutTruncated,
+		&output.StderrTruncated,
+	)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return CommandOutput{}, ErrCommandOutputNotFound
+	}
+
+	if err != nil {
+		return CommandOutput{}, err
+	}
+
+	return output, nil
 }

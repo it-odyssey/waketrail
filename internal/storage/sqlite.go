@@ -43,6 +43,16 @@ type TimelineEvent struct {
 	OccurredAt time.Time
 }
 
+type CommandOutput struct {
+	CommandEventID  int64
+	Stdout          string
+	Stderr          string
+	StdoutBytes     int64
+	StderrBytes     int64
+	StdoutTruncated bool
+	StderrTruncated bool
+}
+
 type Store struct {
 	db *sql.DB
 }
@@ -120,6 +130,19 @@ CREATE TABLE IF NOT EXISTS command_events (
 	exit_code INTEGER NOT NULL,
 	started_at TEXT NOT NULL,
 	ended_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS command_output (
+	command_event_id INTEGER PRIMARY KEY,
+	stdout TEXT NOT NULL DEFAULT '',
+	stderr TEXT NOT NULL DEFAULT '',
+	stdout_bytes INTEGER NOT NULL DEFAULT 0,
+	stderr_bytes INTEGER NOT NULL DEFAULT 0,
+	stdout_truncated INTEGER NOT NULL DEFAULT 0,
+	stderr_truncated INTEGER NOT NULL DEFAULT 0,
+	FOREIGN KEY (command_event_id)
+		REFERENCES command_events(id)
+		ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS git_context (
@@ -298,4 +321,32 @@ VALUES (?, ?, ?, ?, ?);
 	}
 
 	return result.LastInsertId()
+}
+
+func (s *Store) InsertCommandOutput(output CommandOutput) error {
+	const query = `
+INSERT INTO command_output (
+	command_event_id,
+	stdout,
+	stderr,
+	stdout_bytes,
+	stderr_bytes,
+	stdout_truncated,
+	stderr_truncated
+)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+`
+
+	_, err := s.db.Exec(
+		query,
+		output.CommandEventID,
+		output.Stdout,
+		output.Stderr,
+		output.StdoutBytes,
+		output.StderrBytes,
+		output.StdoutTruncated,
+		output.StderrTruncated,
+	)
+
+	return err
 }

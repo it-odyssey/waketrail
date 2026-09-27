@@ -317,3 +317,84 @@ WHERE id = ?
 		)
 	}
 }
+
+func TestInsertAndQueryCommandOutput(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	store, err := Open()
+	if err != nil {
+		t.Fatalf("Open() returned error: %v", err)
+	}
+	defer store.Close()
+
+	event := CommandEvent{
+		Command:   `curl http://127.0.0.1:8080/health`,
+		Cwd:       "/tmp/project",
+		ExitCode:  0,
+		StartedAt: time.Now(),
+		EndedAt:   time.Now(),
+	}
+
+	eventID, err := store.InsertCommandEvent(event)
+	if err != nil {
+		t.Fatalf(
+			"InsertCommandEvent() returned error: %v",
+			err,
+		)
+	}
+
+	expected := CommandOutput{
+		CommandEventID:  eventID,
+		Stdout:          `{"status":"healthy"}`,
+		Stderr:          "",
+		StdoutBytes:     20,
+		StderrBytes:     0,
+		StdoutTruncated: false,
+		StderrTruncated: false,
+	}
+
+	if err := store.InsertCommandOutput(expected); err != nil {
+		t.Fatalf(
+			"InsertCommandOutput() returned error: %v",
+			err,
+		)
+	}
+
+	actual, err := store.CommandOutputForCommandEvent(eventID)
+	if err != nil {
+		t.Fatalf(
+			"CommandOutputForCommandEvent() returned error: %v",
+			err,
+		)
+	}
+
+	if actual.Stdout != expected.Stdout {
+		t.Errorf(
+			"Stdout = %q, want %q",
+			actual.Stdout,
+			expected.Stdout,
+		)
+	}
+
+	if actual.Stderr != expected.Stderr {
+		t.Errorf(
+			"Stderr = %q, want %q",
+			actual.Stderr,
+			expected.Stderr,
+		)
+	}
+
+	if actual.StdoutBytes != expected.StdoutBytes {
+		t.Errorf(
+			"StdoutBytes = %d, want %d",
+			actual.StdoutBytes,
+			expected.StdoutBytes,
+		)
+	}
+
+	if actual.StdoutTruncated {
+		t.Error(
+			"StdoutTruncated = true, want false",
+		)
+	}
+}
