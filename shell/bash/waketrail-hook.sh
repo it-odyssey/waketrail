@@ -20,7 +20,7 @@ __waketrail_precmd() {
         local ended_at
         ended_at="$(date +%s%N)"
 
-        go run "$WAKETRAIL_BIN" record \
+        waketrail record \
             --cwd "$PWD" \
             --exit-code "$exit_code" \
             --started-at "$WAKETRAIL_COMMAND_STARTED_AT" \
