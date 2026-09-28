@@ -89,6 +89,7 @@ SELECT
 	command,
 	cwd,
 	exit_code,
+	capture_mode,
 	started_at,
 	ended_at
 FROM command_events
@@ -116,6 +117,7 @@ ORDER BY started_at ASC;
 			&event.Command,
 			&event.Cwd,
 			&event.ExitCode,
+			&event.CaptureMode,
 			&startedAtText,
 			&endedAtText,
 		)

@@ -17,13 +17,14 @@ type SessionRecord struct {
 }
 
 type CommandEvent struct {
-	ID        int64
-	SessionID *int64
-	Command   string
-	Cwd       string
-	ExitCode  int
-	StartedAt time.Time
-	EndedAt   time.Time
+	ID          int64
+	SessionID   *int64
+	Command     string
+	Cwd         string
+	ExitCode    int
+	CaptureMode string
+	StartedAt   time.Time
+	EndedAt     time.Time
 }
 
 type GitContext struct {
@@ -128,6 +129,7 @@ CREATE TABLE IF NOT EXISTS command_events (
 	command TEXT NOT NULL,
 	cwd TEXT NOT NULL,
 	exit_code INTEGER NOT NULL,
+	capture_mode TEXT NOT NULL DEFAULT 'none',
 	started_at TEXT NOT NULL,
 	ended_at TEXT NOT NULL
 );
@@ -161,7 +163,7 @@ CREATE TABLE IF NOT EXISTS git_context (
 		return err
 	}
 
-	hasSessionID, err := s.commandEventsHasSessionID()
+	hasSessionID, err := s.commandEventsHasColumn("session_id")
 	if err != nil {
 		return err
 	}
@@ -169,6 +171,19 @@ CREATE TABLE IF NOT EXISTS git_context (
 	if !hasSessionID {
 		if _, err := s.db.Exec(
 			`ALTER TABLE command_events ADD COLUMN session_id INTEGER`,
+		); err != nil {
+			return err
+		}
+	}
+
+	hasCaptureMode, err := s.commandEventsHasColumn("capture_mode")
+	if err != nil {
+		return err
+	}
+
+	if !hasCaptureMode {
+		if _, err := s.db.Exec(
+			`ALTER TABLE command_events ADD COLUMN capture_mode TEXT NOT NULL DEFAULT 'none'`,
 		); err != nil {
 			return err
 		}
@@ -184,7 +199,7 @@ ON command_events(session_id);
 	return nil
 }
 
-func (s *Store) commandEventsHasSessionID() (bool, error) {
+func (s *Store) commandEventsHasColumn(columnName string) (bool, error) {
 	rows, err := s.db.Query(`PRAGMA table_info(command_events)`)
 	if err != nil {
 		return false, err
@@ -212,7 +227,7 @@ func (s *Store) commandEventsHasSessionID() (bool, error) {
 			return false, err
 		}
 
-		if name == "session_id" {
+		if name == columnName {
 			return true, nil
 		}
 	}
@@ -250,10 +265,11 @@ INSERT INTO command_events (
 	command,
 	cwd,
 	exit_code,
+	capture_mode,
 	started_at,
 	ended_at
 )
-VALUES (?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?);
 `
 
 	result, err := s.db.Exec(
@@ -262,6 +278,7 @@ VALUES (?, ?, ?, ?, ?, ?);
 		event.Command,
 		event.Cwd,
 		event.ExitCode,
+		event.CaptureMode,
 		event.StartedAt.Format(time.RFC3339Nano),
 		event.EndedAt.Format(time.RFC3339Nano),
 	)

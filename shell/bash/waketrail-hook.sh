@@ -20,6 +20,13 @@ __waketrail_preexec() {
     esac
 
     WAKETRAIL_LAST_COMMAND="$cmd"
+    
+    WAKETRAIL_CAPTURE_MODE="$(waketrail classify "$cmd" 2>/dev/null)"
+
+    if [[ -z "$WAKETRAIL_CAPTURE_MODE" ]]; then
+        WAKETRAIL_CAPTURE_MODE="none"
+    fi
+
     WAKETRAIL_COMMAND_STARTED_AT="$(date +%s%N)"
 }
 
@@ -33,13 +40,16 @@ __waketrail_precmd() {
         waketrail record \
             --cwd "$PWD" \
             --exit-code "$exit_code" \
+            --capture-mode "$WAKETRAIL_CAPTURE_MODE" \
             --started-at "$WAKETRAIL_COMMAND_STARTED_AT" \
             --ended-at "$ended_at" \
             "$WAKETRAIL_LAST_COMMAND" \
             >/dev/null 2>&1
+            
 
         unset WAKETRAIL_LAST_COMMAND
         unset WAKETRAIL_COMMAND_STARTED_AT
+        unset WAKETRAIL_CAPTURE_MODE
     fi
 }
 
@@ -86,3 +96,4 @@ __waketrail_register_precmd
 
 unset WAKETRAIL_LAST_COMMAND
 unset WAKETRAIL_COMMAND_STARTED_AT
+unset WAKETRAIL_CAPTURE_MODE

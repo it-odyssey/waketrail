@@ -11,10 +11,11 @@ import (
 )
 
 var (
-	recordCwd       string
-	recordExitCode  int
-	recordStartedAt int64
-	recordEndedAt   int64
+	recordCwd         string
+	recordExitCode    int
+	recordCaptureMode string
+	recordStartedAt   int64
+	recordEndedAt     int64
 )
 
 var recordCmd = &cobra.Command{
@@ -47,12 +48,13 @@ var recordCmd = &cobra.Command{
 		}
 
 		event := storage.CommandEvent{
-			SessionID: sessionID,
-			Command:   args[0],
-			Cwd:       recordCwd,
-			ExitCode:  recordExitCode,
-			StartedAt: time.Unix(0, recordStartedAt),
-			EndedAt:   time.Unix(0, recordEndedAt),
+			SessionID:   sessionID,
+			Command:     args[0],
+			Cwd:         recordCwd,
+			ExitCode:    recordExitCode,
+			CaptureMode: recordCaptureMode,
+			StartedAt:   time.Unix(0, recordStartedAt),
+			EndedAt:     time.Unix(0, recordEndedAt),
 		}
 
 		commandEventID, err := store.InsertCommandEvent(event)
@@ -90,6 +92,15 @@ func init() {
 		"Working directory",
 	)
 
+	recordCmd.Flags().StringVar(
+		&recordCaptureMode,
+		"capture-mode",
+		"none",
+		"command output capture mode",
+	)
+
+	rootCmd.AddCommand(recordCmd)
+
 	recordCmd.Flags().IntVar(
 		&recordExitCode,
 		"exit-code",
@@ -124,6 +135,4 @@ func init() {
 			return nil
 		},
 	)
-
-	rootCmd.AddCommand(recordCmd)
 }
