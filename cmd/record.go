@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"os"
 	"strconv"
 	"time"
 
@@ -16,6 +17,8 @@ var (
 	recordCaptureMode string
 	recordStartedAt   int64
 	recordEndedAt     int64
+	recordStdoutFile  string
+	recordStderrFile  string
 )
 
 var recordCmd = &cobra.Command{
@@ -62,6 +65,21 @@ var recordCmd = &cobra.Command{
 			return err
 		}
 
+		if recordStdoutFile != "" || recordStderrFile != "" {
+			output, err := loadCommandOutput(
+				commandEventID,
+				recordStdoutFile,
+				recordStderrFile,
+			)
+			if err != nil {
+				return err
+			}
+
+			if err := store.InsertCommandOutput(output); err != nil {
+				return err
+			}
+		}
+
 		gitContext, err := gitcollector.Detect(recordCwd)
 		if err != nil {
 			return err
@@ -82,6 +100,38 @@ var recordCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+func loadCommandOutput(
+	commandEventID int64,
+	stdoutPath string,
+	stderrPath string,
+) (storage.CommandOutput, error) {
+	output := storage.CommandOutput{
+		CommandEventID: commandEventID,
+	}
+
+	if stdoutPath != "" {
+		data, err := os.ReadFile(stdoutPath)
+		if err != nil {
+			return storage.CommandOutput{}, err
+		}
+
+		output.Stdout = string(data)
+		output.StdoutBytes = int64(len(data))
+	}
+
+	if stderrPath != "" {
+		data, err := os.ReadFile(stderrPath)
+		if err != nil {
+			return storage.CommandOutput{}, err
+		}
+
+		output.Stderr = string(data)
+		output.StderrBytes = int64(len(data))
+	}
+
+	return output, nil
 }
 
 func init() {
@@ -134,5 +184,19 @@ func init() {
 			recordEndedAt = parsed
 			return nil
 		},
+	)
+
+	recordCmd.Flags().StringVar(
+		&recordStdoutFile,
+		"stdout-file",
+		"",
+		"path to captured stdout",
+	)
+
+	recordCmd.Flags().StringVar(
+		&recordStderrFile,
+		"stderr-file",
+		"",
+		"path to captured stderr",
 	)
 }
