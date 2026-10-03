@@ -105,12 +105,21 @@ The current CLI supports:
 ```bash
 waketrail start <session-name>
 waketrail status
+waketrail observe
+waketrail mark
 waketrail stop
+waketrail show
+waketrail --help
 ```
 
 The Bash integration can detect interactive commands and capture their exit status.
 
-Persistent command-event storage and richer environment correlation are currently under development.
+WakeTrail can selectively capture output from diagnostic commands such as
+`pwd`, `curl`, `git status`, `docker ps`, and similar inspection commands.
+
+Potentially large output sources such as docker logs, journalctl, kubectl logs, and Terraform plans use bounded capture to avoid flooding the local event store. Session timelines display concise output previews while preserving the underlying captured evidence.
+
+WakeTrail is continuing to expand environment correlation, automated state monitoring, redaction, and report generation.
 
 ## Design Principles
 
@@ -189,6 +198,9 @@ Initial milestones:
 - [x] Session timeline output
 - [x] Generic timeline event model
 - [x] Manual timeline notes
+- [x] Selective command output capture
+- [x] Bounded stdout/stderr capture
+- [x] Command output previews in session timeline
 - [ ] Incident markers
 - [ ] Incident snapshot / export
 - [ ] Omarchy plugin
