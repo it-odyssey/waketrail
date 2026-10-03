@@ -361,12 +361,100 @@ func printPrettyCommand(
 		metaStyle.Render(meta),
 	)
 
+	commandOutput, err := store.CommandOutputForCommandEvent(event.ID)
+
+	if err != nil &&
+		!errors.Is(
+			err,
+			storage.ErrCommandOutputNotFound,
+		) {
+		fmt.Printf(
+			"  │           %s\n",
+			metaStyle.Render("output unavailable"),
+		)
+	}
+
+	if err == nil {
+		if commandOutput.Stdout != "" {
+			printOutputPreview(
+				renderer,
+				"output",
+				commandOutput.Stdout,
+			)
+		}
+
+		if commandOutput.Stderr != "" {
+			printOutputPreview(
+				renderer,
+				"stderr",
+				commandOutput.Stderr,
+			)
+		}
+	}
+
 	if showVerbose {
 		fmt.Printf(
 			"  │           %s\n",
 			metaStyle.Render(
 				"cwd "+ui.ShortPath(event.Cwd),
 			),
+		)
+	}
+}
+
+func printOutputPreview(
+	renderer *lipgloss.Renderer,
+	label string,
+	value string,
+) {
+	const maxLines = 3
+	const maxChars = 240
+
+	value = strings.TrimSpace(value)
+
+	if value == "" {
+		return
+	}
+
+	lines := strings.Split(value, "\n")
+
+	truncated := false
+
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
+		truncated = true
+	}
+
+	preview := strings.Join(lines, "\n")
+
+	if len([]rune(preview)) > maxChars {
+		runes := []rune(preview)
+		preview = string(runes[:maxChars])
+		truncated = true
+	}
+
+	labelStyle := renderer.NewStyle().
+		Foreground(ui.Muted)
+
+	outputStyle := renderer.NewStyle().
+		Foreground(ui.Accent)
+
+	fmt.Printf(
+		"  │           %s\n",
+		labelStyle.Render(label),
+	)
+
+	for _, line := range strings.Split(preview, "\n") {
+		fmt.Printf(
+			"  │             %s\n",
+			outputStyle.Render(line),
+		)
+	}
+
+	if truncated {
+		fmt.Printf(
+			"  │             %s\n",
+			labelStyle.Render("…"),
 		)
 	}
 }

@@ -68,6 +68,7 @@ var recordCmd = &cobra.Command{
 		if recordStdoutFile != "" || recordStderrFile != "" {
 			output, err := loadCommandOutput(
 				commandEventID,
+				recordCaptureMode,
 				recordStdoutFile,
 				recordStderrFile,
 			)
@@ -102,33 +103,88 @@ var recordCmd = &cobra.Command{
 	},
 }
 
+func readCapturedFile(
+	path string,
+	maxBytes int64,
+) (string, int64, bool, error) {
+	if path == "" {
+		return "", 0, false, nil
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", 0, false, err
+	}
+
+	totalBytes := info.Size()
+	truncated := false
+
+	if maxBytes > 0 && totalBytes > maxBytes {
+		file, err := os.Open(path)
+		if err != nil {
+			return "", 0, false, err
+		}
+		defer file.Close()
+
+		data := make([]byte, maxBytes)
+
+		n, err := file.Read(data)
+		if err != nil {
+			return "", 0, false, err
+		}
+
+		data = data[:n]
+		truncated = true
+
+		return string(data), totalBytes, truncated, nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", 0, false, err
+	}
+
+	return string(data), totalBytes, truncated, nil
+}
+
 func loadCommandOutput(
 	commandEventID int64,
+	captureMode string,
 	stdoutPath string,
 	stderrPath string,
 ) (storage.CommandOutput, error) {
+	const boundedLimit int64 = 64 * 1024
+
+	var maxBytes int64
+
+	if captureMode == "bounded" {
+		maxBytes = boundedLimit
+	}
+
+	stdout, stdoutBytes, stdoutTruncated, err := readCapturedFile(
+		stdoutPath,
+		maxBytes,
+	)
+	if err != nil {
+		return storage.CommandOutput{}, err
+	}
+
+	stderr, stderrBytes, stderrTruncated, err := readCapturedFile(
+		stderrPath,
+		maxBytes,
+	)
+	if err != nil {
+		return storage.CommandOutput{}, err
+	}
+
 	output := storage.CommandOutput{
-		CommandEventID: commandEventID,
-	}
-
-	if stdoutPath != "" {
-		data, err := os.ReadFile(stdoutPath)
-		if err != nil {
-			return storage.CommandOutput{}, err
-		}
-
-		output.Stdout = string(data)
-		output.StdoutBytes = int64(len(data))
-	}
-
-	if stderrPath != "" {
-		data, err := os.ReadFile(stderrPath)
-		if err != nil {
-			return storage.CommandOutput{}, err
-		}
-
-		output.Stderr = string(data)
-		output.StderrBytes = int64(len(data))
+		CommandEventID:  commandEventID,
+		Stdout:          stdout,
+		Stderr:          stderr,
+		StdoutBytes:     stdoutBytes,
+		StderrBytes:     stderrBytes,
+		StdoutTruncated: stdoutTruncated,
+		StderrTruncated: stderrTruncated,
 	}
 
 	return output, nil
