@@ -17,8 +17,9 @@ type displayEvent struct {
 	OccurredAt time.Time
 	Kind       string
 
-	CommandEvent  *storage.CommandEvent
-	TimelineEvent *storage.TimelineEvent
+	CommandEvent      *storage.CommandEvent
+	TimelineEvent     *storage.TimelineEvent
+	CorrelatedCommand *storage.CommandEvent
 }
 
 var showVerbose bool
@@ -94,6 +95,8 @@ var showCmd = &cobra.Command{
 			)
 		})
 
+		events = correlateDockerLifecycleEvents(events)
+
 		printReport(
 			store,
 			session,
@@ -104,6 +107,126 @@ var showCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+func correlateDockerLifecycleEvents(
+	events []displayEvent,
+) []displayEvent {
+	result := make(
+		[]displayEvent,
+		0,
+		len(events),
+	)
+
+	for _, event := range events {
+		if !isDockerLifecycleEvent(event) ||
+			len(result) == 0 {
+			result = append(result, event)
+			continue
+		}
+
+		previous := result[len(result)-1]
+
+		if previous.Kind != "command" ||
+			previous.CommandEvent == nil {
+			result = append(result, event)
+			continue
+		}
+
+		command := previous.CommandEvent
+
+		if event.OccurredAt.Before(command.EndedAt) ||
+			event.OccurredAt.Sub(command.EndedAt) > 5*time.Second {
+			result = append(result, event)
+			continue
+		}
+
+		if !dockerCommandMatchesLifecycle(
+			*command,
+			*event.TimelineEvent,
+		) {
+			result = append(result, event)
+			continue
+		}
+
+		event.CorrelatedCommand = command
+
+		// Replace the standalone command with the correlated
+		// Docker lifecycle event in the display timeline.
+		result[len(result)-1] = event
+	}
+
+	return result
+}
+
+func isDockerLifecycleEvent(
+	event displayEvent,
+) bool {
+	if event.Kind != "timeline" ||
+		event.TimelineEvent == nil {
+		return false
+	}
+
+	if event.TimelineEvent.Source != "docker" {
+		return false
+	}
+
+	switch event.TimelineEvent.EventType {
+	case "started", "stopped":
+		return true
+
+	default:
+		return false
+	}
+}
+
+func dockerCommandMatchesLifecycle(
+	command storage.CommandEvent,
+	event storage.TimelineEvent,
+) bool {
+	parts := strings.SplitN(
+		event.Summary,
+		": ",
+		2,
+	)
+
+	if len(parts) != 2 {
+		return false
+	}
+
+	containerName := parts[0]
+
+	fields := strings.Fields(command.Command)
+
+	for len(fields) > 0 &&
+		(fields[0] == "sudo" ||
+			fields[0] == "command") {
+		fields = fields[1:]
+	}
+
+	if len(fields) < 3 ||
+		fields[0] != "docker" {
+		return false
+	}
+
+	expectedAction := ""
+
+	switch event.EventType {
+	case "stopped":
+		expectedAction = "stop"
+
+	case "started":
+		expectedAction = "start"
+
+	default:
+		return false
+	}
+
+	if fields[1] != expectedAction {
+		return false
+	}
+
+	return fields[len(fields)-1] == containerName
 }
 
 func printReport(
@@ -235,6 +358,7 @@ func printReport(
 			printPrettyTimelineEvent(
 				renderer,
 				*event.TimelineEvent,
+				event.CorrelatedCommand,
 			)
 		}
 
@@ -462,12 +586,14 @@ func printOutputPreview(
 func printPrettyTimelineEvent(
 	renderer *lipgloss.Renderer,
 	event storage.TimelineEvent,
+	command *storage.CommandEvent,
 ) {
 	switch event.EventType {
 	case "failure":
 		printEventCard(
 			renderer,
 			event,
+			command,
 			"FAILURE",
 			ui.Failure,
 			"✗",
@@ -477,6 +603,7 @@ func printPrettyTimelineEvent(
 		printEventCard(
 			renderer,
 			event,
+			command,
 			"RECOVERY",
 			ui.Recovery,
 			"✓",
@@ -486,6 +613,7 @@ func printPrettyTimelineEvent(
 		printEventCard(
 			renderer,
 			event,
+			command,
 			"STOPPED",
 			ui.Muted,
 			"■",
@@ -495,6 +623,7 @@ func printPrettyTimelineEvent(
 		printEventCard(
 			renderer,
 			event,
+			command,
 			"STARTED",
 			ui.State,
 			"▶",
@@ -504,6 +633,7 @@ func printPrettyTimelineEvent(
 		printEventCard(
 			renderer,
 			event,
+			command,
 			"NOTE",
 			ui.Note,
 			"✎",
@@ -513,6 +643,7 @@ func printPrettyTimelineEvent(
 		printEventCard(
 			renderer,
 			event,
+			command,
 			"STATE CHANGE",
 			ui.State,
 			"↻",
@@ -522,6 +653,7 @@ func printPrettyTimelineEvent(
 		printEventCard(
 			renderer,
 			event,
+			command,
 			strings.ToUpper(event.EventType),
 			ui.Accent,
 			"•",
@@ -532,6 +664,7 @@ func printPrettyTimelineEvent(
 func printEventCard(
 	renderer *lipgloss.Renderer,
 	event storage.TimelineEvent,
+	command *storage.CommandEvent,
 	label string,
 	color lipgloss.TerminalColor,
 	symbol string,
@@ -560,6 +693,7 @@ func printEventCard(
 	body := formatEventBody(
 		renderer,
 		event,
+		command,
 		bodyStyle,
 		sourceStyle,
 	)
@@ -592,14 +726,15 @@ func printEventCard(
 func formatEventBody(
 	renderer *lipgloss.Renderer,
 	event storage.TimelineEvent,
+	command *storage.CommandEvent,
 	bodyStyle lipgloss.Style,
 	sourceStyle lipgloss.Style,
 ) string {
-	source := sourceStyle.Render(event.Source)
-
 	if event.EventType == "note" {
 		return bodyStyle.Render(event.Summary)
 	}
+
+	source := sourceStyle.Render(event.Source)
 
 	parts := strings.SplitN(
 		event.Summary,
@@ -607,27 +742,38 @@ func formatEventBody(
 		2,
 	)
 
+	var body string
+
 	if len(parts) != 2 {
-		return source + "\n\n" +
+		body = source +
+			"\n\n" +
 			bodyStyle.Render(
 				formatTransitionArrow(
 					event.Summary,
 				),
 			)
+	} else {
+		name := renderer.NewStyle().
+			Bold(true).
+			Foreground(ui.Accent).
+			Render(parts[0])
+
+		body = source +
+			" · " +
+			name +
+			"\n\n" +
+			bodyStyle.Render(
+				formatTransitionArrow(parts[1]),
+			)
 	}
 
-	name := renderer.NewStyle().
-		Bold(true).
-		Foreground(ui.Accent).
-		Render(parts[0])
+	if command != nil {
+		body += "\n\n" +
+			sourceStyle.Render("command · ") +
+			bodyStyle.Render(command.Command)
+	}
 
-	return source +
-		" · " +
-		name +
-		"\n\n" +
-		bodyStyle.Render(
-			formatTransitionArrow(parts[1]),
-		)
+	return body
 }
 
 func formatTransitionArrow(
