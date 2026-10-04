@@ -138,8 +138,6 @@ func buildExportEvents(
 	events = correlateDockerLifecycleEvents(events)
 
 	return filterWakeTrailCommands(events)
-
-	return correlateDockerLifecycleEvents(events)
 }
 
 func sortDisplayEvents(events []displayEvent) {
@@ -394,34 +392,103 @@ func writeMarkdownTimelineEvent(
 		),
 	)
 
+	if event.EventType == "note" {
+		fmt.Fprintf(
+			builder,
+			"### NOTE\n\n",
+		)
+
+		fmt.Fprintf(
+			builder,
+			"> %s\n\n",
+			event.Summary,
+		)
+
+		return
+	}
+
+	collector := titleSource(event.Source)
+
 	fmt.Fprintf(
 		builder,
-		"### %s — %s\n\n",
-		event.OccurredAt.Format("15:04:05"),
+		"### %s: %s\n\n",
+		collector,
 		label,
 	)
 
-	fmt.Fprintf(
-		builder,
-		"- Source: %s\n",
-		event.Source,
+	parts := strings.SplitN(
+		event.Summary,
+		": ",
+		2,
 	)
 
-	fmt.Fprintf(
-		builder,
-		"- Event: %s\n",
-		formatTransitionArrow(event.Summary),
-	)
+	if len(parts) == 2 {
+		resourceLabel := resourceLabelForSource(
+			event.Source,
+		)
+
+		fmt.Fprintf(
+			builder,
+			"&nbsp;&nbsp;&nbsp;&nbsp;**%s: `%s`**\n\n",
+			resourceLabel,
+			parts[0],
+		)
+
+		fmt.Fprintf(
+			builder,
+			"&nbsp;&nbsp;&nbsp;&nbsp;%s: `%s`\n\n",
+			event.OccurredAt.Format("15:04:05"),
+			formatTransitionArrow(parts[1]),
+		)
+	} else {
+		fmt.Fprintf(
+			builder,
+			"&nbsp;&nbsp;&nbsp;&nbsp;%s: %s\n\n",
+			event.OccurredAt.Format("15:04:05"),
+			formatTransitionArrow(event.Summary),
+		)
+	}
 
 	if command != nil {
 		fmt.Fprintf(
 			builder,
-			"- Command: `%s`\n",
+			"&nbsp;&nbsp;&nbsp;&nbsp;**Command:** `%s`\n\n",
 			command.Command,
 		)
 	}
 
-	builder.WriteString("\n")
+	builder.WriteString("---\n\n")
+}
+
+func titleSource(source string) string {
+	if source == "" {
+		return ""
+	}
+
+	runes := []rune(source)
+
+	runes[0] = unicode.ToUpper(runes[0])
+
+	return string(runes)
+}
+
+func resourceLabelForSource(source string) string {
+	switch source {
+	case "docker":
+		return "Container"
+
+	case "systemd":
+		return "Service"
+
+	case "kubernetes":
+		return "Resource"
+
+	case "terraform":
+		return "Resource"
+
+	default:
+		return "Resource"
+	}
 }
 
 func safeExportFilename(name string) string {
