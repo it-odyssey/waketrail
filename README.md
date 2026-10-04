@@ -109,7 +109,9 @@ waketrail observe
 waketrail mark
 waketrail stop
 waketrail show
-waketrail --help
+waketrail list
+waketrail help
+waketrail watch <service>
 ```
 
 The Bash integration can detect interactive commands and capture their exit status.
