@@ -96,7 +96,7 @@ var showCmd = &cobra.Command{
 			)
 		})
 
-		events = correlateDockerLifecycleEvents(events)
+		events = correlateLifecycleEvents(events)
 
 		if !showVerbose {
 			events = filterWakeTrailCommands(events)
@@ -114,7 +114,7 @@ var showCmd = &cobra.Command{
 	},
 }
 
-func correlateDockerLifecycleEvents(
+func correlateLifecycleEvents(
 	events []displayEvent,
 ) []displayEvent {
 	result := make(
@@ -124,7 +124,7 @@ func correlateDockerLifecycleEvents(
 	)
 
 	for _, event := range events {
-		if !isDockerLifecycleEvent(event) ||
+		if !isLifecycleEvent(event) ||
 			len(result) == 0 {
 			result = append(result, event)
 			continue
@@ -146,7 +146,7 @@ func correlateDockerLifecycleEvents(
 			continue
 		}
 
-		if !dockerCommandMatchesLifecycle(
+		if !commandMatchesLifecycle(
 			*command,
 			*event.TimelineEvent,
 		) {
@@ -164,7 +164,7 @@ func correlateDockerLifecycleEvents(
 	return result
 }
 
-func isDockerLifecycleEvent(
+func isLifecycleEvent(
 	event displayEvent,
 ) bool {
 	if event.Kind != "timeline" ||
@@ -172,13 +172,31 @@ func isDockerLifecycleEvent(
 		return false
 	}
 
-	if event.TimelineEvent.Source != "docker" {
-		return false
-	}
-
 	switch event.TimelineEvent.EventType {
 	case "started", "stopped":
 		return true
+
+	default:
+		return false
+	}
+}
+
+func commandMatchesLifecycle(
+	command storage.CommandEvent,
+	event storage.TimelineEvent,
+) bool {
+	switch event.Source {
+	case "docker":
+		return dockerCommandMatchesLifecycle(
+			command,
+			event,
+		)
+
+	case "systemd":
+		return systemdCommandMatchesLifecycle(
+			command,
+			event,
+		)
 
 	default:
 		return false
@@ -203,14 +221,10 @@ func dockerCommandMatchesLifecycle(
 
 	fields := strings.Fields(command.Command)
 
-	for len(fields) > 0 &&
-		(fields[0] == "sudo" ||
-			fields[0] == "command") {
-		fields = fields[1:]
-	}
+	fields = stripCommandPrefixes(fields)
 
 	if len(fields) < 3 ||
-		fields[0] != "docker" {
+		filepath.Base(fields[0]) != "docker" {
 		return false
 	}
 
@@ -232,6 +246,72 @@ func dockerCommandMatchesLifecycle(
 	}
 
 	return fields[len(fields)-1] == containerName
+}
+
+func systemdCommandMatchesLifecycle(
+	command storage.CommandEvent,
+	event storage.TimelineEvent,
+) bool {
+	parts := strings.SplitN(
+		event.Summary,
+		": ",
+		2,
+	)
+
+	if len(parts) != 2 {
+		return false
+	}
+
+	serviceName := parts[0]
+
+	fields := strings.Fields(command.Command)
+
+	fields = stripCommandPrefixes(fields)
+
+	if len(fields) < 3 ||
+		filepath.Base(fields[0]) != "systemctl" {
+		return false
+	}
+
+	expectedAction := ""
+
+	switch event.EventType {
+	case "stopped":
+		expectedAction = "stop"
+
+	case "started":
+		expectedAction = "start"
+
+	default:
+		return false
+	}
+
+	if fields[1] != expectedAction {
+		return false
+	}
+
+	return fields[len(fields)-1] == serviceName
+}
+
+func stripCommandPrefixes(
+	fields []string,
+) []string {
+	for len(fields) > 0 {
+		switch fields[0] {
+		case "sudo", "command":
+			fields = fields[1:]
+
+			for len(fields) > 0 &&
+				strings.HasPrefix(fields[0], "-") {
+				fields = fields[1:]
+			}
+
+		default:
+			return fields
+		}
+	}
+
+	return fields
 }
 
 func filterWakeTrailCommands(

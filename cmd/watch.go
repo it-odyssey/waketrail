@@ -6,10 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	dockercollector "github.com/it-odyssey/waketrail/internal/collectors/docker"
+	systemdcollector "github.com/it-odyssey/waketrail/internal/collectors/systemd"
 	"github.com/it-odyssey/waketrail/internal/state"
 	"github.com/it-odyssey/waketrail/internal/storage"
 	watchengine "github.com/it-odyssey/waketrail/internal/watch"
@@ -17,10 +19,15 @@ import (
 )
 
 var (
-	dockerWatchInterval time.Duration
-	watchDetach         bool
-	watchWorker         bool
+	watchInterval time.Duration
+	watchDetach   bool
+	watchWorker   bool
 )
+
+type activeCollector struct {
+	collector watchengine.Collector
+	previous  any
+}
 
 var watchCmd = &cobra.Command{
 	Use:   "watch",
@@ -28,7 +35,11 @@ var watchCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return startDockerWatch(watchDetach)
+		return startCollectorsWatch(
+			allWatchCollectors(),
+			watchDetach,
+			"",
+		)
 	},
 }
 
@@ -38,7 +49,29 @@ var watchDockerCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return startDockerWatch(watchDetach)
+		return startCollectorsWatch(
+			[]watchengine.Collector{
+				dockercollector.NewCollector(),
+			},
+			watchDetach,
+			"docker",
+		)
+	},
+}
+
+var watchSystemdCmd = &cobra.Command{
+	Use:   "systemd",
+	Short: "Continuously watch systemd service state",
+	Args:  cobra.NoArgs,
+
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return startCollectorsWatch(
+			[]watchengine.Collector{
+				systemdcollector.NewCollector(),
+			},
+			watchDetach,
+			"systemd",
+		)
 	},
 }
 
@@ -70,7 +103,7 @@ var watchStatusCmd = &cobra.Command{
 		}
 
 		fmt.Printf(
-			"Watcher running\nPID: %d\nCollector: %s\nSession ID: %d\nStarted: %s\n",
+			"Watcher running\nPID: %d\nCollectors: %s\nSession ID: %d\nStarted: %s\n",
 			watch.PID,
 			watch.Collector,
 			watch.SessionID,
@@ -119,18 +152,17 @@ var watchStopCmd = &cobra.Command{
 	},
 }
 
-func startDockerWatch(detach bool) error {
-	collector := dockercollector.NewCollector()
-
-	return startCollectorWatch(
-		collector,
-		detach,
-	)
+func allWatchCollectors() []watchengine.Collector {
+	return []watchengine.Collector{
+		dockercollector.NewCollector(),
+		systemdcollector.NewCollector(),
+	}
 }
 
-func startCollectorWatch(
-	collector watchengine.Collector,
+func startCollectorsWatch(
+	collectors []watchengine.Collector,
 	detach bool,
+	target string,
 ) error {
 	active, err := state.HasActiveSession()
 	if err != nil {
@@ -143,8 +175,7 @@ func startCollectorWatch(
 		)
 	}
 
-	// The detached worker was already validated by the parent process.
-	// It must not reject itself when it sees its own watch state.
+	// Detached workers have already been validated by the parent process.
 	if !watchWorker {
 		if err := ensureNoActiveWatch(); err != nil {
 			return err
@@ -157,28 +188,45 @@ func startCollectorWatch(
 	}
 
 	if detach && !watchWorker {
-		return startDetachedDockerWatch(session.ID)
+		return startDetachedWatch(
+			session.ID,
+			collectors,
+			target,
+		)
 	}
 
-	return runCollectorWatch(
+	return runCollectorsWatch(
 		session.ID,
-		collector,
+		collectors,
 	)
 }
 
-func startDetachedDockerWatch(sessionID int64) error {
+func startDetachedWatch(
+	sessionID int64,
+	collectors []watchengine.Collector,
+	target string,
+) error {
 	executable, err := os.Executable()
 	if err != nil {
 		return err
 	}
 
-	child := exec.Command(
-		executable,
-		"watch",
-		"docker",
+	args := []string{"watch"}
+
+	if target != "" {
+		args = append(args, target)
+	}
+
+	args = append(
+		args,
 		"--worker",
 		"--interval",
-		dockerWatchInterval.String(),
+		watchInterval.String(),
+	)
+
+	child := exec.Command(
+		executable,
+		args...,
 	)
 
 	child.Stdin = nil
@@ -198,7 +246,7 @@ func startDetachedDockerWatch(sessionID int64) error {
 	if err := state.SaveWatchState(state.WatchState{
 		PID:       pid,
 		SessionID: sessionID,
-		Collector: "docker",
+		Collector: collectorNames(collectors),
 		StartedAt: time.Now(),
 	}); err != nil {
 		_ = child.Process.Kill()
@@ -217,20 +265,50 @@ func startDetachedDockerWatch(sessionID int64) error {
 	return nil
 }
 
-func runCollectorWatch(
+func runCollectorsWatch(
 	sessionID int64,
-	collector watchengine.Collector,
+	collectors []watchengine.Collector,
 ) error {
-	previous, err := collector.Snapshot()
-	if err != nil {
-		return err
+	activeCollectors := make(
+		[]activeCollector,
+		0,
+		len(collectors),
+	)
+
+	for _, collector := range collectors {
+		snapshot, err := collector.Snapshot()
+		if err != nil {
+			if !watchWorker {
+				fmt.Printf(
+					"Skipping %s collector: %v\n",
+					collector.Name(),
+					err,
+				)
+			}
+
+			continue
+		}
+
+		activeCollectors = append(
+			activeCollectors,
+			activeCollector{
+				collector: collector,
+				previous:  snapshot,
+			},
+		)
+	}
+
+	if len(activeCollectors) == 0 {
+		return fmt.Errorf(
+			"no supported collectors are available",
+		)
 	}
 
 	if !watchWorker {
 		if err := state.SaveWatchState(state.WatchState{
 			PID:       os.Getpid(),
 			SessionID: sessionID,
-			Collector: collector.Name(),
+			Collector: activeCollectorNames(activeCollectors),
 			StartedAt: time.Now(),
 		}); err != nil {
 			return err
@@ -248,14 +326,14 @@ func runCollectorWatch(
 	if !watchWorker {
 		fmt.Printf(
 			"Watching %s every %s. Press Ctrl+C to stop.\n",
-			collector.Name(),
-			dockerWatchInterval,
+			activeCollectorNames(activeCollectors),
+			watchInterval,
 		)
 
-		fmt.Println("Baseline captured.")
+		fmt.Println("Baselines captured.")
 	}
 
-	ticker := time.NewTicker(dockerWatchInterval)
+	ticker := time.NewTicker(watchInterval)
 	defer ticker.Stop()
 
 	signals := make(chan os.Signal, 1)
@@ -271,74 +349,113 @@ func runCollectorWatch(
 	for {
 		select {
 		case <-ticker.C:
-			current, err := collector.Snapshot()
-			if err != nil {
-				if !watchWorker {
-					fmt.Printf(
-						"%s observation failed: %v\n",
-						collector.Name(),
-						err,
-					)
+			for i := range activeCollectors {
+				active := &activeCollectors[i]
+
+				current, err := active.collector.Snapshot()
+				if err != nil {
+					if !watchWorker {
+						fmt.Printf(
+							"%s observation failed: %v\n",
+							active.collector.Name(),
+							err,
+						)
+					}
+
+					continue
 				}
 
-				continue
+				events, err := active.collector.Compare(
+					active.previous,
+					current,
+				)
+				if err != nil {
+					if !watchWorker {
+						fmt.Printf(
+							"%s comparison failed: %v\n",
+							active.collector.Name(),
+							err,
+						)
+					}
+
+					continue
+				}
+
+				for _, event := range events {
+					timelineEvent := storage.TimelineEvent{
+						SessionID:  &sessionID,
+						EventType:  event.EventType,
+						Source:     event.Source,
+						Summary:    event.Summary,
+						OccurredAt: time.Now(),
+					}
+
+					if _, err := store.InsertTimelineEvent(
+						timelineEvent,
+					); err != nil {
+						return err
+					}
+
+					if !watchWorker {
+						fmt.Printf(
+							"[%s] %s: %s\n",
+							event.EventType,
+							event.Source,
+							event.Summary,
+						)
+					}
+				}
+
+				active.previous = current
 			}
-
-			events, err := collector.Compare(
-				previous,
-				current,
-			)
-			if err != nil {
-				if !watchWorker {
-					fmt.Printf(
-						"%s comparison failed: %v\n",
-						collector.Name(),
-						err,
-					)
-				}
-
-				continue
-			}
-
-			for _, event := range events {
-				timelineEvent := storage.TimelineEvent{
-					SessionID:  &sessionID,
-					EventType:  event.EventType,
-					Source:     event.Source,
-					Summary:    event.Summary,
-					OccurredAt: time.Now(),
-				}
-
-				if _, err := store.InsertTimelineEvent(
-					timelineEvent,
-				); err != nil {
-					return err
-				}
-
-				if !watchWorker {
-					fmt.Printf(
-						"[%s] %s: %s\n",
-						event.EventType,
-						event.Source,
-						event.Summary,
-					)
-				}
-			}
-
-			previous = current
 
 		case <-signals:
 			if !watchWorker {
 				fmt.Println()
-				fmt.Printf(
-					"%s watch stopped.\n",
-					collector.Name(),
-				)
+				fmt.Println("WakeTrail watch stopped.")
 			}
 
 			return nil
 		}
 	}
+}
+
+func collectorNames(
+	collectors []watchengine.Collector,
+) string {
+	names := make(
+		[]string,
+		0,
+		len(collectors),
+	)
+
+	for _, collector := range collectors {
+		names = append(
+			names,
+			collector.Name(),
+		)
+	}
+
+	return strings.Join(names, ", ")
+}
+
+func activeCollectorNames(
+	collectors []activeCollector,
+) string {
+	names := make(
+		[]string,
+		0,
+		len(collectors),
+	)
+
+	for _, active := range collectors {
+		names = append(
+			names,
+			active.collector.Name(),
+		)
+	}
+
+	return strings.Join(names, ", ")
 }
 
 func ensureNoActiveWatch() error {
@@ -371,8 +488,8 @@ func processRunning(pid int) bool {
 	return process.Signal(syscall.Signal(0)) == nil
 }
 
-func init() {
-	watchCmd.Flags().BoolVarP(
+func addWatchFlags(cmd *cobra.Command) {
+	cmd.Flags().BoolVarP(
 		&watchDetach,
 		"detach",
 		"d",
@@ -380,39 +497,31 @@ func init() {
 		"run watcher in the background",
 	)
 
-	watchDockerCmd.Flags().BoolVarP(
-		&watchDetach,
-		"detach",
-		"d",
-		false,
-		"run watcher in the background",
-	)
-
-	watchDockerCmd.Flags().BoolVar(
+	cmd.Flags().BoolVar(
 		&watchWorker,
 		"worker",
 		false,
 		"run internal detached watcher",
 	)
 
-	_ = watchDockerCmd.Flags().MarkHidden("worker")
+	_ = cmd.Flags().MarkHidden("worker")
 
-	watchDockerCmd.Flags().DurationVar(
-		&dockerWatchInterval,
-		"interval",
-		2*time.Second,
-		"interval between Docker observations",
-	)
-
-	watchCmd.Flags().DurationVar(
-		&dockerWatchInterval,
+	cmd.Flags().DurationVar(
+		&watchInterval,
 		"interval",
 		2*time.Second,
 		"interval between observations",
 	)
+}
+
+func init() {
+	addWatchFlags(watchCmd)
+	addWatchFlags(watchDockerCmd)
+	addWatchFlags(watchSystemdCmd)
 
 	watchCmd.AddCommand(
 		watchDockerCmd,
+		watchSystemdCmd,
 		watchStatusCmd,
 		watchStopCmd,
 	)

@@ -135,7 +135,7 @@ func buildExportEvents(
 
 	sortDisplayEvents(events)
 
-	events = correlateDockerLifecycleEvents(events)
+	events = correlateLifecycleEvents(events)
 
 	return filterWakeTrailCommands(events)
 }
