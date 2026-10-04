@@ -6,6 +6,7 @@ import (
 	"time"
 
 	gitcollector "github.com/it-odyssey/waketrail/internal/collectors/git"
+	"github.com/it-odyssey/waketrail/internal/redact"
 	"github.com/it-odyssey/waketrail/internal/state"
 	"github.com/it-odyssey/waketrail/internal/storage"
 	"github.com/spf13/cobra"
@@ -52,7 +53,7 @@ var recordCmd = &cobra.Command{
 
 		event := storage.CommandEvent{
 			SessionID:   sessionID,
-			Command:     args[0],
+			Command:     redact.String(args[0]),
 			Cwd:         recordCwd,
 			ExitCode:    recordExitCode,
 			CaptureMode: recordCaptureMode,
@@ -179,8 +180,8 @@ func loadCommandOutput(
 
 	output := storage.CommandOutput{
 		CommandEventID:  commandEventID,
-		Stdout:          stdout,
-		Stderr:          stderr,
+		Stdout:          redact.String(stdout),
+		Stderr:          redact.String(stderr),
 		StdoutBytes:     stdoutBytes,
 		StderrBytes:     stderrBytes,
 		StdoutTruncated: stdoutTruncated,
