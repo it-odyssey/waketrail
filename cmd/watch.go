@@ -12,6 +12,7 @@ import (
 	"time"
 
 	dockercollector "github.com/it-odyssey/waketrail/internal/collectors/docker"
+	kubernetescollector "github.com/it-odyssey/waketrail/internal/collectors/kubernetes"
 	systemdcollector "github.com/it-odyssey/waketrail/internal/collectors/systemd"
 	"github.com/it-odyssey/waketrail/internal/state"
 	"github.com/it-odyssey/waketrail/internal/storage"
@@ -72,6 +73,22 @@ var watchSystemdCmd = &cobra.Command{
 			},
 			watchDetach,
 			"systemd",
+		)
+	},
+}
+
+var watchKubernetesCmd = &cobra.Command{
+	Use:   "kubernetes",
+	Short: "Continuously watch Kubernetes resource state",
+	Args:  cobra.NoArgs,
+
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return startCollectorsWatch(
+			[]watchengine.Collector{
+				kubernetescollector.NewCollector(),
+			},
+			watchDetach,
+			"kubernetes",
 		)
 	},
 }
@@ -157,6 +174,7 @@ func allWatchCollectors() []watchengine.Collector {
 	return []watchengine.Collector{
 		dockercollector.NewCollector(),
 		systemdcollector.NewCollector(),
+		kubernetescollector.NewCollector(),
 	}
 }
 
@@ -553,10 +571,12 @@ func init() {
 	addWatchFlags(watchCmd)
 	addWatchFlags(watchDockerCmd)
 	addWatchFlags(watchSystemdCmd)
+	addWatchFlags(watchKubernetesCmd)
 
 	watchCmd.AddCommand(
 		watchDockerCmd,
 		watchSystemdCmd,
+		watchKubernetesCmd,
 		watchStatusCmd,
 		watchStopCmd,
 	)
