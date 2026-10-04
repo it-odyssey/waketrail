@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -96,6 +97,10 @@ var showCmd = &cobra.Command{
 		})
 
 		events = correlateDockerLifecycleEvents(events)
+
+		if !showVerbose {
+			events = filterWakeTrailCommands(events)
+		}
 
 		printReport(
 			store,
@@ -227,6 +232,48 @@ func dockerCommandMatchesLifecycle(
 	}
 
 	return fields[len(fields)-1] == containerName
+}
+
+func filterWakeTrailCommands(
+	events []displayEvent,
+) []displayEvent {
+	filtered := make(
+		[]displayEvent,
+		0,
+		len(events),
+	)
+
+	for _, event := range events {
+		if event.Kind == "command" &&
+			event.CommandEvent != nil &&
+			isWakeTrailCommand(event.CommandEvent.Command) {
+			continue
+		}
+
+		filtered = append(filtered, event)
+	}
+
+	return filtered
+}
+
+func isWakeTrailCommand(command string) bool {
+	fields := strings.Fields(command)
+
+	if len(fields) == 0 {
+		return false
+	}
+
+	for len(fields) > 0 &&
+		(fields[0] == "sudo" ||
+			fields[0] == "command") {
+		fields = fields[1:]
+	}
+
+	if len(fields) == 0 {
+		return false
+	}
+
+	return filepath.Base(fields[0]) == "waketrail"
 }
 
 func printReport(

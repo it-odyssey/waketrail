@@ -135,6 +135,10 @@ func buildExportEvents(
 
 	sortDisplayEvents(events)
 
+	events = correlateDockerLifecycleEvents(events)
+
+	return filterWakeTrailCommands(events)
+
 	return correlateDockerLifecycleEvents(events)
 }
 
@@ -190,55 +194,60 @@ func buildMarkdownExport(
 
 	builder.WriteString("## Summary\n\n")
 
+	builder.WriteString("| Metric | Value |\n")
+	builder.WriteString("| --- | --- |\n")
+
 	fmt.Fprintf(
 		&builder,
-		"- Started: %s\n",
+		"| Started | %s |\n",
 		session.StartedAt.Format(
 			"2006-01-02 15:04:05",
 		),
 	)
 
+	ended := "Recording"
+
 	if session.EndedAt != nil {
-		fmt.Fprintf(
-			&builder,
-			"- Ended: %s\n",
-			session.EndedAt.Format(
-				"2006-01-02 15:04:05",
-			),
+		ended = session.EndedAt.Format(
+			"2006-01-02 15:04:05",
 		)
 	}
 
 	fmt.Fprintf(
 		&builder,
-		"- Duration: %s\n",
+		"| Ended | %s |\n",
+		ended,
+	)
+
+	fmt.Fprintf(
+		&builder,
+		"| Duration | %s |\n",
 		duration,
 	)
 
 	fmt.Fprintf(
 		&builder,
-		"- Events: %d\n",
+		"| Events | %d |\n",
 		len(events),
 	)
 
 	fmt.Fprintf(
 		&builder,
-		"- Failures: %d\n",
+		"| Failures | %d |\n",
 		failureCount,
 	)
 
 	fmt.Fprintf(
 		&builder,
-		"- Recoveries: %d\n",
+		"| Recoveries | %d |\n",
 		recoveryCount,
 	)
 
-	if noteCount > 0 {
-		fmt.Fprintf(
-			&builder,
-			"- Notes: %d\n",
-			noteCount,
-		)
-	}
+	fmt.Fprintf(
+		&builder,
+		"| Notes | %d |\n",
+		noteCount,
+	)
 
 	builder.WriteString("\n## Timeline\n\n")
 
@@ -280,7 +289,7 @@ func writeMarkdownCommand(
 		event.StartedAt.Format("15:04:05"),
 	)
 
-	builder.WriteString("```text\n")
+	builder.WriteString("```bash\n")
 	builder.WriteString(event.Command)
 	builder.WriteString("\n```\n\n")
 
