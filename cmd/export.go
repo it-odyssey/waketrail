@@ -416,38 +416,26 @@ func writeMarkdownTimelineEvent(
 		label,
 	)
 
-	parts := strings.SplitN(
-		event.Summary,
-		": ",
-		2,
-	)
+	resource := timelineResourceName(event)
+	summary := timelineDisplaySummary(event)
 
-	if len(parts) == 2 {
-		resourceLabel := resourceLabelForSource(
-			event.Source,
-		)
+	if resource != "" {
+		resourceLabel := resourceLabelForEvent(event)
 
 		fmt.Fprintf(
 			builder,
 			"&nbsp;&nbsp;&nbsp;&nbsp;**%s: `%s`**\n\n",
 			resourceLabel,
-			parts[0],
-		)
-
-		fmt.Fprintf(
-			builder,
-			"&nbsp;&nbsp;&nbsp;&nbsp;%s: `%s`\n\n",
-			event.OccurredAt.Format("15:04:05"),
-			formatTransitionArrow(parts[1]),
-		)
-	} else {
-		fmt.Fprintf(
-			builder,
-			"&nbsp;&nbsp;&nbsp;&nbsp;%s: %s\n\n",
-			event.OccurredAt.Format("15:04:05"),
-			formatTransitionArrow(event.Summary),
+			resource,
 		)
 	}
+
+	fmt.Fprintf(
+		builder,
+		"&nbsp;&nbsp;&nbsp;&nbsp;%s: `%s`\n\n",
+		event.OccurredAt.Format("15:04:05"),
+		formatTransitionArrow(summary),
+	)
 
 	if command != nil {
 		fmt.Fprintf(
@@ -472,8 +460,14 @@ func titleSource(source string) string {
 	return string(runes)
 }
 
-func resourceLabelForSource(source string) string {
-	switch source {
+func resourceLabelForEvent(
+	event storage.TimelineEvent,
+) string {
+	if event.ResourceType != "" {
+		return titleSource(event.ResourceType)
+	}
+
+	switch event.Source {
 	case "docker":
 		return "Container"
 

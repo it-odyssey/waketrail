@@ -207,17 +207,11 @@ func dockerCommandMatchesLifecycle(
 	command storage.CommandEvent,
 	event storage.TimelineEvent,
 ) bool {
-	parts := strings.SplitN(
-		event.Summary,
-		": ",
-		2,
-	)
+	containerName := timelineResourceName(event)
 
-	if len(parts) != 2 {
+	if containerName == "" {
 		return false
 	}
-
-	containerName := parts[0]
 
 	fields := strings.Fields(command.Command)
 
@@ -252,17 +246,11 @@ func systemdCommandMatchesLifecycle(
 	command storage.CommandEvent,
 	event storage.TimelineEvent,
 ) bool {
-	parts := strings.SplitN(
-		event.Summary,
-		": ",
-		2,
-	)
+	serviceName := timelineResourceName(event)
 
-	if len(parts) != 2 {
+	if serviceName == "" {
 		return false
 	}
-
-	serviceName := parts[0]
 
 	fields := strings.Fields(command.Command)
 
@@ -850,6 +838,58 @@ func printEventCard(
 	}
 }
 
+func timelineResourceName(
+	event storage.TimelineEvent,
+) string {
+	if event.Resource != "" {
+		return event.Resource
+	}
+
+	parts := strings.SplitN(
+		event.Summary,
+		": ",
+		2,
+	)
+
+	if len(parts) == 2 {
+		return parts[0]
+	}
+
+	return ""
+}
+
+func timelineDisplaySummary(
+	event storage.TimelineEvent,
+) string {
+	if event.Resource != "" {
+		prefix := event.Resource + ": "
+
+		if strings.HasPrefix(
+			event.Summary,
+			prefix,
+		) {
+			return strings.TrimPrefix(
+				event.Summary,
+				prefix,
+			)
+		}
+
+		return event.Summary
+	}
+
+	parts := strings.SplitN(
+		event.Summary,
+		": ",
+		2,
+	)
+
+	if len(parts) == 2 {
+		return parts[1]
+	}
+
+	return event.Summary
+}
+
 func formatEventBody(
 	renderer *lipgloss.Renderer,
 	event storage.TimelineEvent,
@@ -863,34 +903,29 @@ func formatEventBody(
 
 	source := sourceStyle.Render(event.Source)
 
-	parts := strings.SplitN(
-		event.Summary,
-		": ",
-		2,
-	)
+	resource := timelineResourceName(event)
+	summary := timelineDisplaySummary(event)
 
 	var body string
 
-	if len(parts) != 2 {
+	if resource == "" {
 		body = source +
 			"\n\n" +
 			bodyStyle.Render(
-				formatTransitionArrow(
-					event.Summary,
-				),
+				formatTransitionArrow(summary),
 			)
 	} else {
 		name := renderer.NewStyle().
 			Bold(true).
 			Foreground(ui.Accent).
-			Render(parts[0])
+			Render(resource)
 
 		body = source +
 			" · " +
 			name +
 			"\n\n" +
 			bodyStyle.Render(
-				formatTransitionArrow(parts[1]),
+				formatTransitionArrow(summary),
 			)
 	}
 
