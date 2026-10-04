@@ -289,3 +289,92 @@ WHERE command_event_id = ?;
 
 	return output, nil
 }
+
+type SessionSummary struct {
+	ID         int64
+	Name       string
+	StartedAt  time.Time
+	EndedAt    *time.Time
+	EventCount int
+}
+
+func (s *Store) ListSessions() ([]SessionSummary, error) {
+	const query = `
+SELECT
+	s.id,
+	s.name,
+	s.started_at,
+	s.ended_at,
+	(
+		SELECT COUNT(*)
+		FROM command_events ce
+		WHERE ce.session_id = s.id
+	) +
+	(
+		SELECT COUNT(*)
+		FROM timeline_events te
+		WHERE te.session_id = s.id
+	) AS event_count
+FROM sessions s
+ORDER BY s.id DESC;
+`
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sessions []SessionSummary
+
+	for rows.Next() {
+		var (
+			session       SessionSummary
+			startedAtText string
+			endedAtText   sql.NullString
+		)
+
+		if err := rows.Scan(
+			&session.ID,
+			&session.Name,
+			&startedAtText,
+			&endedAtText,
+			&session.EventCount,
+		); err != nil {
+			return nil, err
+		}
+
+		startedAt, err := time.Parse(
+			time.RFC3339Nano,
+			startedAtText,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		session.StartedAt = startedAt
+
+		if endedAtText.Valid {
+			endedAt, err := time.Parse(
+				time.RFC3339Nano,
+				endedAtText.String,
+			)
+			if err != nil {
+				return nil, err
+			}
+
+			session.EndedAt = &endedAt
+		}
+
+		sessions = append(
+			sessions,
+			session,
+		)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return sessions, nil
+}
