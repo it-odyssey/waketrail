@@ -192,6 +192,8 @@ SELECT
 	session_id,
 	event_type,
 	source,
+	resource_type,
+	resource_name,
 	summary,
 	occurred_at
 FROM timeline_events
@@ -219,6 +221,8 @@ ORDER BY occurred_at ASC;
 			&storedSession,
 			&event.EventType,
 			&event.Source,
+			&event.ResourceType,
+			&event.Resource,
 			&event.Summary,
 			&occurredAtText,
 		)

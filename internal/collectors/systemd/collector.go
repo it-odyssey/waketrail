@@ -51,9 +51,11 @@ func (Collector) Compare(
 
 	for _, transition := range transitions {
 		events = append(events, watch.Event{
-			EventType: transition.EventType,
-			Source:    "systemd",
-			Summary:   transition.Summary,
+			EventType:    transition.EventType,
+			Source:       "systemd",
+			ResourceType: "service",
+			Resource:     transition.Name,
+			Summary:      transition.Summary,
 		})
 	}
 

@@ -4,9 +4,11 @@ package watch
 // Collectors translate their domain-specific state into this common format
 // before the event reaches storage or presentation.
 type Event struct {
-	EventType string
-	Source    string
-	Summary   string
+	EventType    string
+	Source       string
+	ResourceType string
+	Resource     string
+	Summary      string
 }
 
 // Collector represents a system that WakeTrail can observe continuously.

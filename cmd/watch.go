@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -229,9 +230,41 @@ func startDetachedWatch(
 		args...,
 	)
 
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	logDir := filepath.Join(
+		home,
+		".local",
+		"state",
+		"waketrail",
+	)
+
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return err
+	}
+
+	logPath := filepath.Join(
+		logDir,
+		"watch.log",
+	)
+
+	logFile, err := os.OpenFile(
+		logPath,
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
+		0644,
+	)
+	if err != nil {
+		return err
+	}
+
+	defer logFile.Close()
+
 	child.Stdin = nil
-	child.Stdout = nil
-	child.Stderr = nil
+	child.Stdout = logFile
+	child.Stderr = logFile
 
 	child.SysProcAttr = &syscall.SysProcAttr{
 		Setsid: true,
@@ -383,11 +416,13 @@ func runCollectorsWatch(
 
 				for _, event := range events {
 					timelineEvent := storage.TimelineEvent{
-						SessionID:  &sessionID,
-						EventType:  event.EventType,
-						Source:     event.Source,
-						Summary:    event.Summary,
-						OccurredAt: time.Now(),
+						SessionID:    &sessionID,
+						EventType:    event.EventType,
+						Source:       event.Source,
+						ResourceType: event.ResourceType,
+						Resource:     event.Resource,
+						Summary:      event.Summary,
+						OccurredAt:   time.Now(),
 					}
 
 					if _, err := store.InsertTimelineEvent(

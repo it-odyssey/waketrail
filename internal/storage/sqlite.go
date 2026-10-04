@@ -36,12 +36,14 @@ type GitContext struct {
 }
 
 type TimelineEvent struct {
-	ID         int64
-	SessionID  *int64
-	EventType  string
-	Source     string
-	Summary    string
-	OccurredAt time.Time
+	ID           int64
+	SessionID    *int64
+	EventType    string
+	Source       string
+	ResourceType string
+	Resource     string
+	Summary      string
+	OccurredAt   time.Time
 }
 
 type CommandOutput struct {
@@ -88,6 +90,19 @@ func Open() (*Store, error) {
 		return nil, err
 	}
 
+	// WakeTrail can have the interactive shell recorder and a detached
+	// watcher accessing SQLite at the same time. Use one connection per
+	// Store and allow short-lived write locks to clear instead of failing
+	// immediately with SQLITE_BUSY.
+	db.SetMaxOpenConns(1)
+
+	if _, err := db.Exec(
+		"PRAGMA busy_timeout = 5000;",
+	); err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	store := &Store{db: db}
 
 	if err := store.migrate(); err != nil {
@@ -116,6 +131,8 @@ CREATE TABLE IF NOT EXISTS timeline_events (
 	session_id INTEGER,
 	event_type TEXT NOT NULL,
 	source TEXT NOT NULL,
+	resource_type TEXT NOT NULL DEFAULT '',
+	resource_name TEXT NOT NULL DEFAULT '',
 	summary TEXT NOT NULL,
 	occurred_at TEXT NOT NULL,
 	FOREIGN KEY (session_id)
@@ -189,6 +206,36 @@ CREATE TABLE IF NOT EXISTS git_context (
 		}
 	}
 
+	hasResourceType, err := s.timelineEventsHasColumn(
+		"resource_type",
+	)
+	if err != nil {
+		return err
+	}
+
+	if !hasResourceType {
+		if _, err := s.db.Exec(
+			`ALTER TABLE timeline_events ADD COLUMN resource_type TEXT NOT NULL DEFAULT ''`,
+		); err != nil {
+			return err
+		}
+	}
+
+	hasResourceName, err := s.timelineEventsHasColumn(
+		"resource_name",
+	)
+	if err != nil {
+		return err
+	}
+
+	if !hasResourceName {
+		if _, err := s.db.Exec(
+			`ALTER TABLE timeline_events ADD COLUMN resource_name TEXT NOT NULL DEFAULT ''`,
+		); err != nil {
+			return err
+		}
+	}
+
 	if _, err := s.db.Exec(`
 CREATE INDEX IF NOT EXISTS idx_command_events_session_id
 ON command_events(session_id);
@@ -201,6 +248,46 @@ ON command_events(session_id);
 
 func (s *Store) commandEventsHasColumn(columnName string) (bool, error) {
 	rows, err := s.db.Query(`PRAGMA table_info(command_events)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultVal any
+			primaryKey int
+		)
+
+		if err := rows.Scan(
+			&cid,
+			&name,
+			&columnType,
+			&notNull,
+			&defaultVal,
+			&primaryKey,
+		); err != nil {
+			return false, err
+		}
+
+		if name == columnName {
+			return true, nil
+		}
+	}
+
+	return false, rows.Err()
+}
+
+func (s *Store) timelineEventsHasColumn(
+	columnName string,
+) (bool, error) {
+	rows, err := s.db.Query(
+		`PRAGMA table_info(timeline_events)`,
+	)
 	if err != nil {
 		return false, err
 	}
@@ -313,16 +400,20 @@ VALUES (?, ?, ?, ?, ?);
 	return err
 }
 
-func (s *Store) InsertTimelineEvent(event TimelineEvent) (int64, error) {
+func (s *Store) InsertTimelineEvent(
+	event TimelineEvent,
+) (int64, error) {
 	const query = `
 INSERT INTO timeline_events (
 	session_id,
 	event_type,
 	source,
+	resource_type,
+	resource_name,
 	summary,
 	occurred_at
 )
-VALUES (?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?);
 `
 
 	result, err := s.db.Exec(
@@ -330,6 +421,8 @@ VALUES (?, ?, ?, ?, ?);
 		event.SessionID,
 		event.EventType,
 		event.Source,
+		event.ResourceType,
+		event.Resource,
 		event.Summary,
 		event.OccurredAt.Format(time.RFC3339Nano),
 	)

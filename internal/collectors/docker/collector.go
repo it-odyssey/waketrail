@@ -51,9 +51,11 @@ func (Collector) Compare(
 
 	for _, transition := range transitions {
 		events = append(events, watch.Event{
-			EventType: transition.EventType,
-			Source:    "docker",
-			Summary:   transition.Summary,
+			EventType:    transition.EventType,
+			Source:       "docker",
+			ResourceType: "container",
+			Resource:     transition.Name,
+			Summary:      transition.Summary,
 		})
 	}
 
