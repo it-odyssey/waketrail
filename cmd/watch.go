@@ -12,6 +12,7 @@ import (
 	dockercollector "github.com/it-odyssey/waketrail/internal/collectors/docker"
 	"github.com/it-odyssey/waketrail/internal/state"
 	"github.com/it-odyssey/waketrail/internal/storage"
+	watchengine "github.com/it-odyssey/waketrail/internal/watch"
 	"github.com/spf13/cobra"
 )
 
@@ -119,6 +120,18 @@ var watchStopCmd = &cobra.Command{
 }
 
 func startDockerWatch(detach bool) error {
+	collector := dockercollector.NewCollector()
+
+	return startCollectorWatch(
+		collector,
+		detach,
+	)
+}
+
+func startCollectorWatch(
+	collector watchengine.Collector,
+	detach bool,
+) error {
 	active, err := state.HasActiveSession()
 	if err != nil {
 		return err
@@ -147,7 +160,10 @@ func startDockerWatch(detach bool) error {
 		return startDetachedDockerWatch(session.ID)
 	}
 
-	return runDockerWatch(session.ID)
+	return runCollectorWatch(
+		session.ID,
+		collector,
+	)
 }
 
 func startDetachedDockerWatch(sessionID int64) error {
@@ -201,8 +217,11 @@ func startDetachedDockerWatch(sessionID int64) error {
 	return nil
 }
 
-func runDockerWatch(sessionID int64) error {
-	previous, err := dockercollector.Detect()
+func runCollectorWatch(
+	sessionID int64,
+	collector watchengine.Collector,
+) error {
+	previous, err := collector.Snapshot()
 	if err != nil {
 		return err
 	}
@@ -211,7 +230,7 @@ func runDockerWatch(sessionID int64) error {
 		if err := state.SaveWatchState(state.WatchState{
 			PID:       os.Getpid(),
 			SessionID: sessionID,
-			Collector: "docker",
+			Collector: collector.Name(),
 			StartedAt: time.Now(),
 		}); err != nil {
 			return err
@@ -228,14 +247,12 @@ func runDockerWatch(sessionID int64) error {
 
 	if !watchWorker {
 		fmt.Printf(
-			"Watching Docker every %s. Press Ctrl+C to stop.\n",
+			"Watching %s every %s. Press Ctrl+C to stop.\n",
+			collector.Name(),
 			dockerWatchInterval,
 		)
 
-		fmt.Printf(
-			"Baseline: %d containers\n",
-			len(previous),
-		)
+		fmt.Println("Baseline captured.")
 	}
 
 	ticker := time.NewTicker(dockerWatchInterval)
@@ -254,11 +271,12 @@ func runDockerWatch(sessionID int64) error {
 	for {
 		select {
 		case <-ticker.C:
-			current, err := dockercollector.Detect()
+			current, err := collector.Snapshot()
 			if err != nil {
 				if !watchWorker {
 					fmt.Printf(
-						"Docker observation failed: %v\n",
+						"%s observation failed: %v\n",
+						collector.Name(),
 						err,
 					)
 				}
@@ -266,30 +284,42 @@ func runDockerWatch(sessionID int64) error {
 				continue
 			}
 
-			transitions := dockercollector.Compare(
+			events, err := collector.Compare(
 				previous,
 				current,
 			)
+			if err != nil {
+				if !watchWorker {
+					fmt.Printf(
+						"%s comparison failed: %v\n",
+						collector.Name(),
+						err,
+					)
+				}
 
-			for _, transition := range transitions {
-				event := storage.TimelineEvent{
+				continue
+			}
+
+			for _, event := range events {
+				timelineEvent := storage.TimelineEvent{
 					SessionID:  &sessionID,
-					EventType:  transition.EventType,
-					Source:     "docker",
-					Summary:    transition.Summary,
+					EventType:  event.EventType,
+					Source:     event.Source,
+					Summary:    event.Summary,
 					OccurredAt: time.Now(),
 				}
 
 				if _, err := store.InsertTimelineEvent(
-					event,
+					timelineEvent,
 				); err != nil {
 					return err
 				}
 
 				if !watchWorker {
 					fmt.Printf(
-						"[%s] docker: %s\n",
+						"[%s] %s: %s\n",
 						event.EventType,
+						event.Source,
 						event.Summary,
 					)
 				}
@@ -300,7 +330,10 @@ func runDockerWatch(sessionID int64) error {
 		case <-signals:
 			if !watchWorker {
 				fmt.Println()
-				fmt.Println("Docker watch stopped.")
+				fmt.Printf(
+					"%s watch stopped.\n",
+					collector.Name(),
+				)
 			}
 
 			return nil
