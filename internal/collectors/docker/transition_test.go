@@ -195,3 +195,143 @@ func TestCompareDetectsRemovedContainer(t *testing.T) {
 		)
 	}
 }
+
+func TestCompareDetectsCleanStop(t *testing.T) {
+	previous := []ContainerState{
+		{
+			Name:   "nginx",
+			State:  "running",
+			Status: "Up 10 minutes",
+		},
+	}
+
+	current := []ContainerState{
+		{
+			Name:   "nginx",
+			State:  "exited",
+			Status: "Exited (0) 2 seconds ago",
+		},
+	}
+
+	transitions := Compare(previous, current)
+
+	if len(transitions) != 1 {
+		t.Fatalf(
+			"len(transitions) = %d, want 1",
+			len(transitions),
+		)
+	}
+
+	if transitions[0].EventType != EventStopped {
+		t.Errorf(
+			"EventType = %q, want %q",
+			transitions[0].EventType,
+			EventStopped,
+		)
+	}
+}
+
+func TestCompareDetectsNormalStart(t *testing.T) {
+	previous := []ContainerState{
+		{
+			Name:   "nginx",
+			State:  "exited",
+			Status: "Exited (0) 10 seconds ago",
+		},
+	}
+
+	current := []ContainerState{
+		{
+			Name:   "nginx",
+			State:  "running",
+			Status: "Up 2 seconds",
+		},
+	}
+
+	transitions := Compare(previous, current)
+
+	if len(transitions) != 1 {
+		t.Fatalf(
+			"len(transitions) = %d, want 1",
+			len(transitions),
+		)
+	}
+
+	if transitions[0].EventType != EventStarted {
+		t.Errorf(
+			"EventType = %q, want %q",
+			transitions[0].EventType,
+			EventStarted,
+		)
+	}
+}
+
+func TestCompareDetectsNonzeroExitAsFailure(t *testing.T) {
+	previous := []ContainerState{
+		{
+			Name:   "api",
+			State:  "running",
+			Status: "Up 10 minutes",
+		},
+	}
+
+	current := []ContainerState{
+		{
+			Name:   "api",
+			State:  "exited",
+			Status: "Exited (1) 2 seconds ago",
+		},
+	}
+
+	transitions := Compare(previous, current)
+
+	if len(transitions) != 1 {
+		t.Fatalf(
+			"len(transitions) = %d, want 1",
+			len(transitions),
+		)
+	}
+
+	if transitions[0].EventType != EventFailure {
+		t.Errorf(
+			"EventType = %q, want %q",
+			transitions[0].EventType,
+			EventFailure,
+		)
+	}
+}
+
+func TestCompareDetectsRestartAfterFailureAsRecovery(t *testing.T) {
+	previous := []ContainerState{
+		{
+			Name:   "api",
+			State:  "exited",
+			Status: "Exited (1) 10 seconds ago",
+		},
+	}
+
+	current := []ContainerState{
+		{
+			Name:   "api",
+			State:  "running",
+			Status: "Up 2 seconds",
+		},
+	}
+
+	transitions := Compare(previous, current)
+
+	if len(transitions) != 1 {
+		t.Fatalf(
+			"len(transitions) = %d, want 1",
+			len(transitions),
+		)
+	}
+
+	if transitions[0].EventType != EventRecovery {
+		t.Errorf(
+			"EventType = %q, want %q",
+			transitions[0].EventType,
+			EventRecovery,
+		)
+	}
+}

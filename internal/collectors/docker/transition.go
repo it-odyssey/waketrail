@@ -1,11 +1,16 @@
 package docker
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const (
 	EventStateChange = "state_change"
 	EventFailure     = "failure"
 	EventRecovery    = "recovery"
+	EventStopped     = "stopped"
+	EventStarted     = "started"
 )
 
 type Transition struct {
@@ -109,6 +114,22 @@ func classifyTransition(
 	previous ContainerState,
 	current ContainerState,
 ) string {
+	// A clean Docker exit usually means the container was intentionally
+	// stopped rather than crashing.
+	if previous.State == "running" &&
+		current.State == "exited" &&
+		isCleanExit(current) {
+		return EventStopped
+	}
+
+	// A container returning from a clean stopped state is a normal start,
+	// not a recovery from failure.
+	if previous.State == "exited" &&
+		isCleanExit(previous) &&
+		current.State == "running" {
+		return EventStarted
+	}
+
 	previousFailed := isFailureState(previous)
 	currentFailed := isFailureState(current)
 
@@ -130,12 +151,22 @@ func isFailureState(container ContainerState) bool {
 	}
 
 	switch container.State {
-	case "exited", "dead", "restarting":
+	case "dead", "restarting":
 		return true
+
+	case "exited":
+		return !isCleanExit(container)
 
 	default:
 		return false
 	}
+}
+
+func isCleanExit(container ContainerState) bool {
+	return strings.Contains(
+		container.Status,
+		"Exited (0)",
+	)
 }
 
 func describeState(container ContainerState) string {
@@ -149,6 +180,12 @@ func describeState(container ContainerState) string {
 
 	if container.State == "" {
 		return "unknown"
+	}
+
+	if container.State == "exited" && container.Status != "" {
+		if isCleanExit(container) {
+			return "exited (0)"
+		}
 	}
 
 	return container.State

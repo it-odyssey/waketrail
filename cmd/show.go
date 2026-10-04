@@ -482,6 +482,24 @@ func printPrettyTimelineEvent(
 			"✓",
 		)
 
+	case "stopped":
+		printEventCard(
+			renderer,
+			event,
+			"STOPPED",
+			ui.Muted,
+			"■",
+		)
+
+	case "started":
+		printEventCard(
+			renderer,
+			event,
+			"STARTED",
+			ui.State,
+			"▶",
+		)
+
 	case "note":
 		printEventCard(
 			renderer,
