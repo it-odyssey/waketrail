@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"syscall"
 	"time"
 
 	"github.com/it-odyssey/waketrail/internal/state"
@@ -34,6 +37,10 @@ var stopCmd = &cobra.Command{
 		}
 		defer store.Close()
 
+		if err := stopSessionWatcher(session.ID); err != nil {
+			return err
+		}
+
 		endedAt := time.Now()
 
 		if err := store.EndSession(session.ID, endedAt); err != nil {
@@ -51,6 +58,58 @@ var stopCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+func stopSessionWatcher(sessionID int64) error {
+	watch, err := state.LoadWatchState()
+
+	if errors.Is(err, state.ErrWatchNotRunning) {
+		return nil
+	}
+
+	if err != nil {
+		return err
+	}
+
+	// Do not stop a watcher that belongs to some other session.
+	if watch.SessionID != sessionID {
+		return nil
+	}
+
+	if !processRunning(watch.PID) {
+		return state.ClearWatchState()
+	}
+
+	process, err := os.FindProcess(watch.PID)
+	if err != nil {
+		return err
+	}
+
+	if err := process.Signal(syscall.SIGTERM); err != nil {
+		if !processRunning(watch.PID) {
+			return state.ClearWatchState()
+		}
+
+		return err
+	}
+
+	// Give the worker a brief opportunity to handle SIGTERM and
+	// clear its own watch state before the recording is closed.
+	deadline := time.Now().Add(2 * time.Second)
+
+	for processRunning(watch.PID) &&
+		time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if processRunning(watch.PID) {
+		return fmt.Errorf(
+			"watcher PID %d did not stop",
+			watch.PID,
+		)
+	}
+
+	return state.ClearWatchState()
 }
 
 func init() {
