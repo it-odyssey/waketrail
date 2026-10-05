@@ -21,6 +21,7 @@ type displayEvent struct {
 	CommandEvent      *storage.CommandEvent
 	TimelineEvent     *storage.TimelineEvent
 	CorrelatedCommand *storage.CommandEvent
+	Activity          *displayActivity
 }
 
 var showVerbose bool
@@ -99,6 +100,7 @@ var showCmd = &cobra.Command{
 		events = correlateLifecycleEvents(events)
 
 		if !showVerbose {
+			events = groupKubernetesActivities(events)
 			events = filterWakeTrailCommands(events)
 		}
 
@@ -314,7 +316,12 @@ func filterWakeTrailCommands(
 	for _, event := range events {
 		if event.Kind == "command" &&
 			event.CommandEvent != nil &&
-			isWakeTrailCommand(event.CommandEvent.Command) {
+			(isWakeTrailCommand(
+				event.CommandEvent.Command,
+			) ||
+				isShellHousekeepingCommand(
+					event.CommandEvent.Command,
+				)) {
 			continue
 		}
 
@@ -342,6 +349,35 @@ func isWakeTrailCommand(command string) bool {
 	}
 
 	return filepath.Base(fields[0]) == "waketrail"
+}
+
+func isShellHousekeepingCommand(
+	command string,
+) bool {
+	fields := strings.Fields(command)
+
+	if len(fields) < 2 {
+		return false
+	}
+
+	if fields[0] != "." &&
+		fields[0] != "source" {
+		return false
+	}
+
+	path := strings.Trim(
+		fields[1],
+		`"'`,
+	)
+
+	return strings.Contains(
+		path,
+		"/.local/share/",
+	) &&
+		strings.HasSuffix(
+			path,
+			"/bin/env",
+		)
 }
 
 func printReport(
@@ -474,6 +510,12 @@ func printReport(
 				renderer,
 				*event.TimelineEvent,
 				event.CorrelatedCommand,
+			)
+
+		case "activity":
+			printPrettyActivity(
+				renderer,
+				*event.Activity,
 			)
 		}
 
@@ -694,6 +736,137 @@ func printOutputPreview(
 		fmt.Printf(
 			"  │             %s\n",
 			labelStyle.Render("…"),
+		)
+	}
+}
+
+func printPrettyActivity(
+	renderer *lipgloss.Renderer,
+	activity displayActivity,
+) {
+	color := ui.State
+	symbol := "↻"
+
+	switch activity.EventType {
+	case "failure":
+		color = ui.Failure
+		symbol = "✗"
+
+	case "recovery":
+		color = ui.Recovery
+		symbol = "✓"
+	}
+
+	timeStyle := renderer.NewStyle().
+		Foreground(ui.Muted)
+
+	headerStyle := renderer.NewStyle().
+		Bold(true).
+		Foreground(color)
+
+	valueStyle := renderer.NewStyle().
+		Foreground(ui.Accent)
+
+	border := lipgloss.RoundedBorder()
+
+	cardStyle := renderer.NewStyle().
+		Border(border).
+		BorderForeground(color).
+		Padding(0, 1).
+		Width(72)
+
+	eventLabel := strings.ToUpper(
+		strings.ReplaceAll(
+			activity.EventType,
+			"_",
+			" ",
+		),
+	)
+
+	resourceLabel := displayResourceType(
+		activity.ResourceType,
+	)
+
+	var body strings.Builder
+
+	fmt.Fprintf(
+		&body,
+		"%s: %s\n\n",
+		resourceLabel,
+		activity.Resource,
+	)
+
+	fmt.Fprintf(
+		&body,
+		"%s: Effects:\n",
+		activity.OccurredAt.Format("15:04:05"),
+	)
+
+	for i, effect := range summarizeActivityEffects(
+		activity.Effects,
+	) {
+		if i > 0 {
+			body.WriteString("\n")
+		}
+
+		fmt.Fprintf(
+			&body,
+			"  %s: %s\n",
+			displayResourceType(
+				effect.ResourceType,
+			),
+			effect.Resource,
+		)
+
+		for _, line := range formatActivityEffectLines(
+			effect,
+		) {
+			fmt.Fprintf(
+				&body,
+				"    %s\n",
+				line,
+			)
+		}
+	}
+
+	if activity.Command != nil {
+		fmt.Fprintf(
+			&body,
+			"\nCommand: %s",
+			activity.Command.Command,
+		)
+	}
+
+	card := cardStyle.Render(
+		valueStyle.Render(
+			strings.TrimSpace(
+				body.String(),
+			),
+		),
+	)
+
+	fmt.Printf(
+		"  %s  %s %s\n",
+		timeStyle.Render(
+			activity.OccurredAt.Format("15:04:05"),
+		),
+		renderer.NewStyle().
+			Foreground(color).
+			Render(symbol),
+		headerStyle.Render(
+			titleSource(activity.Source)+
+				": "+
+				eventLabel,
+		),
+	)
+
+	for _, line := range strings.Split(
+		card,
+		"\n",
+	) {
+		fmt.Printf(
+			"  │           %s\n",
+			line,
 		)
 	}
 }
