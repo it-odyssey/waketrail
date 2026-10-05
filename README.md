@@ -203,23 +203,31 @@ Initial milestones:
 - [x] Selective command output capture
 - [x] Bounded stdout/stderr capture
 - [x] Command output previews in session timeline
+- [x] Secret and sensitive-data redaction
+- [x] Continuous watch mode
+- [x] Structured resource-aware timeline events
+- [x] Command-to-effect correlation
+- [x] Activity grouping / semantic presentation
+- [x] Detached watch mode — waketrail watch -d
+- [x] Session listing / history
+- [x] Docker / Compose collector
+- [x] systemd collector
+- [x] Terraform / OpenTofu collector
+- [x] Kubernetes collector
+- [x] Git collector
+- [x] Automatic state-change detection
+- [x] Automatic failure and recovery events
+- [ ] Rolling retroactive buffer with `--retro`
+- [ ] Omarchy plugin
 - [ ] Incident markers
 - [ ] Incident snapshot / export
-- [ ] Omarchy plugin
-- [ ] Secret and sensitive-data redaction
+- [ ] Collector-specific activity classification
 - [ ] Additional shell support
-- [ ] Rolling retroactive buffer with `--retro`
-- [ ] Continuous watch mode
-- [ ] Automatic state-change detection
-- [ ] Automatic failure and recovery events
 - [ ] Window-only screenshot capture
   - [ ] Screenshot capture will be window-only and opt-in.
 - [ ] Evidence and artifact attachments
-- [ ] Docker / Compose collector
-- [ ] systemd collector
-- [ ] Terraform / OpenTofu adapter
-- [ ] Kubernetes adapter
 - [ ] Report generation
+  - [x] Markdown session export
   - [ ] Incident report
   - [ ] Runbook
   - [ ] Portfolio case study

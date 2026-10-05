@@ -136,6 +136,7 @@ func buildExportEvents(
 	sortDisplayEvents(events)
 
 	events = correlateLifecycleEvents(events)
+	events = correlateTerraformEvents(events)
 	events = groupKubernetesActivities(events)
 
 	return filterWakeTrailCommands(events)

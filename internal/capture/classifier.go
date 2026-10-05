@@ -196,8 +196,28 @@ func classifyTerraform(fields []string) Mode {
 		"version":
 		return ModeOutput
 
-	case "plan":
+	case "plan",
+		"apply",
+		"destroy":
 		return ModeBounded
+
+	case "state":
+		return classifyTerraformState(fields)
+
+	default:
+		return ModeNone
+	}
+}
+
+func classifyTerraformState(fields []string) Mode {
+	if len(fields) < 3 {
+		return ModeNone
+	}
+
+	switch fields[2] {
+	case "list",
+		"show":
+		return ModeOutput
 
 	default:
 		return ModeNone

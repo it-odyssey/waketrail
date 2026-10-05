@@ -100,6 +100,7 @@ var showCmd = &cobra.Command{
 		events = correlateLifecycleEvents(events)
 
 		if !showVerbose {
+			events = correlateTerraformEvents(events)
 			events = groupKubernetesActivities(events)
 			events = filterWakeTrailCommands(events)
 		}
@@ -164,6 +165,92 @@ func correlateLifecycleEvents(
 	}
 
 	return result
+}
+
+func correlateTerraformEvents(
+	events []displayEvent,
+) []displayEvent {
+	result := make(
+		[]displayEvent,
+		0,
+		len(events),
+	)
+
+	for _, event := range events {
+		if event.Kind != "timeline" ||
+			event.TimelineEvent == nil ||
+			event.TimelineEvent.Source != "terraform" ||
+			len(result) == 0 {
+			result = append(result, event)
+			continue
+		}
+
+		previous := result[len(result)-1]
+
+		if previous.Kind != "command" ||
+			previous.CommandEvent == nil {
+			result = append(result, event)
+			continue
+		}
+
+		command := previous.CommandEvent
+
+		if event.OccurredAt.Before(
+			command.EndedAt,
+		) ||
+			event.OccurredAt.Sub(
+				command.EndedAt,
+			) > 5*time.Second {
+			result = append(result, event)
+			continue
+		}
+
+		if !commandMatchesTerraform(
+			*command,
+		) {
+			result = append(result, event)
+			continue
+		}
+
+		event.CorrelatedCommand = command
+
+		// Replace the standalone Terraform command with its
+		// semantic timeline event in the normal presentation.
+		result[len(result)-1] = event
+	}
+
+	return result
+}
+
+func commandMatchesTerraform(
+	command storage.CommandEvent,
+) bool {
+	fields := strings.Fields(
+		command.Command,
+	)
+
+	fields = stripCommandPrefixes(fields)
+
+	if len(fields) < 2 {
+		return false
+	}
+
+	name := filepath.Base(fields[0])
+
+	if name != "terraform" &&
+		name != "tofu" {
+		return false
+	}
+
+	switch fields[1] {
+	case "plan",
+		"apply",
+		"destroy":
+		return true
+
+	default:
+		return false
+	}
 }
 
 func isLifecycleEvent(

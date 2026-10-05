@@ -1,11 +1,15 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	gitcollector "github.com/it-odyssey/waketrail/internal/collectors/git"
+	terraformcollector "github.com/it-odyssey/waketrail/internal/collectors/terraform"
 	"github.com/it-odyssey/waketrail/internal/redact"
 	"github.com/it-odyssey/waketrail/internal/state"
 	"github.com/it-odyssey/waketrail/internal/storage"
@@ -66,6 +70,8 @@ var recordCmd = &cobra.Command{
 			return err
 		}
 
+		var commandOutput *storage.CommandOutput
+
 		if recordStdoutFile != "" || recordStderrFile != "" {
 			output, err := loadCommandOutput(
 				commandEventID,
@@ -79,6 +85,24 @@ var recordCmd = &cobra.Command{
 
 			if err := store.InsertCommandOutput(output); err != nil {
 				return err
+			}
+
+			commandOutput = &output
+		}
+
+		if commandOutput != nil && sessionID != nil {
+			event, ok := terraformTimelineEvent(
+				args[0],
+				recordCwd,
+				commandOutput.Stdout,
+				commandOutput.Stderr,
+				*sessionID,
+				event.EndedAt,
+			)
+			if ok {
+				if _, err := store.InsertTimelineEvent(event); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -189,6 +213,79 @@ func loadCommandOutput(
 	}
 
 	return output, nil
+}
+
+func terraformTimelineEvent(
+	command string,
+	cwd string,
+	stdout string,
+	stderr string,
+	sessionID int64,
+	occurredAt time.Time,
+) (storage.TimelineEvent, bool) {
+	fields := strings.Fields(command)
+
+	if len(fields) < 2 {
+		return storage.TimelineEvent{}, false
+	}
+
+	name := filepath.Base(fields[0])
+
+	if name != "terraform" && name != "tofu" {
+		return storage.TimelineEvent{}, false
+	}
+
+	subcommand := fields[1]
+
+	output := stdout
+	if stderr != "" {
+		output += "\n" + stderr
+	}
+
+	var (
+		summary terraformcollector.ChangeSummary
+		err     error
+		label   string
+	)
+
+	switch subcommand {
+	case "plan":
+		summary, err = terraformcollector.ParsePlan(output)
+		label = "Planned"
+
+	case "apply":
+		summary, err = terraformcollector.ParseApply(output)
+		label = "Applied"
+
+	case "destroy":
+		summary, err = terraformcollector.ParseDestroy(output)
+		label = "Destroyed"
+
+	default:
+		return storage.TimelineEvent{}, false
+	}
+
+	if err != nil {
+		return storage.TimelineEvent{}, false
+	}
+
+	resource := filepath.Base(
+		filepath.Clean(cwd),
+	)
+
+	return storage.TimelineEvent{
+		SessionID:    &sessionID,
+		EventType:    "state_change",
+		Source:       "terraform",
+		ResourceType: "deployment",
+		Resource:     resource,
+		Summary: fmt.Sprintf(
+			"%s: %s",
+			label,
+			terraformcollector.FormatSummary(summary),
+		),
+		OccurredAt: occurredAt,
+	}, true
 }
 
 func init() {

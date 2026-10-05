@@ -114,6 +114,31 @@ func TestClassify(t *testing.T) {
 			want:    ModeOutput,
 		},
 		{
+			name:    "terraform apply",
+			command: "terraform apply -auto-approve",
+			want:    ModeBounded,
+		},
+		{
+			name:    "tofu apply",
+			command: "tofu apply -auto-approve",
+			want:    ModeBounded,
+		},
+		{
+			name:    "terraform destroy",
+			command: "terraform destroy -auto-approve",
+			want:    ModeBounded,
+		},
+		{
+			name:    "terraform state list",
+			command: "terraform state list",
+			want:    ModeOutput,
+		},
+		{
+			name:    "terraform state show",
+			command: "terraform state show aws_instance.web",
+			want:    ModeOutput,
+		},
+		{
 			name:    "tofu plan",
 			command: "tofu plan",
 			want:    ModeBounded,
