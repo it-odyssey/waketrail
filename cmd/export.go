@@ -136,6 +136,7 @@ func buildExportEvents(
 	sortDisplayEvents(events)
 
 	events = correlateLifecycleEvents(events)
+	events = groupKubernetesActivities(events)
 
 	return filterWakeTrailCommands(events)
 }
@@ -266,6 +267,12 @@ func buildMarkdownExport(
 				*event.TimelineEvent,
 				event.CorrelatedCommand,
 			)
+
+		case "activity":
+			writeMarkdownActivity(
+				&builder,
+				*event.Activity,
+			)
 		}
 	}
 
@@ -377,6 +384,78 @@ func writeMarkdownCommand(
 	builder.WriteString("\n")
 
 	return nil
+}
+
+func writeMarkdownActivity(
+	builder *strings.Builder,
+	activity displayActivity,
+) {
+	label := strings.ToUpper(
+		strings.ReplaceAll(
+			activity.EventType,
+			"_",
+			" ",
+		),
+	)
+
+	fmt.Fprintf(
+		builder,
+		"### %s: %s\n\n",
+		titleSource(activity.Source),
+		label,
+	)
+
+	fmt.Fprintf(
+		builder,
+		"&nbsp;&nbsp;&nbsp;&nbsp;**%s: `%s`**  \n",
+		displayResourceType(
+			activity.ResourceType,
+		),
+		activity.Resource,
+	)
+
+	fmt.Fprintf(
+		builder,
+		"&nbsp;&nbsp;&nbsp;&nbsp;%s: **Effects:**  \n",
+		activity.OccurredAt.Format("15:04:05"),
+	)
+
+	for i, effect := range summarizeActivityEffects(
+		activity.Effects,
+	) {
+		if i > 0 {
+			builder.WriteString("  \n")
+		}
+
+		fmt.Fprintf(
+			builder,
+			"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;**%s: `%s`**  \n",
+			displayResourceType(
+				effect.ResourceType,
+			),
+			effect.Resource,
+		)
+
+		for _, line := range formatActivityEffectLines(
+			effect,
+		) {
+			fmt.Fprintf(
+				builder,
+				"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;`%s`  \n",
+				line,
+			)
+		}
+	}
+
+	if activity.Command != nil {
+		fmt.Fprintf(
+			builder,
+			"  \n&nbsp;&nbsp;&nbsp;&nbsp;**Command:** `%s`\n\n",
+			activity.Command.Command,
+		)
+	}
+
+	builder.WriteString("---\n\n")
 }
 
 func writeMarkdownTimelineEvent(
