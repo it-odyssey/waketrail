@@ -159,8 +159,26 @@ __waketrail_register_precmd() {
     fi
 }
 
-trap '__waketrail_preexec' DEBUG
+__waketrail_register_debug_trap() {
+    local existing_trap
+    local existing_command=""
 
+    existing_trap="$(trap -p DEBUG)"
+
+    if [[ -n "$existing_trap" &&
+          "$existing_trap" != *"__waketrail_preexec"* ]]; then
+        existing_command="${existing_trap#trap -- \'}"
+        existing_command="${existing_command%\' DEBUG}"
+    fi
+
+    if [[ -n "$existing_command" ]]; then
+        trap "__waketrail_preexec; $existing_command" DEBUG
+    else
+        trap '__waketrail_preexec' DEBUG
+    fi
+}
+
+__waketrail_register_debug_trap
 __waketrail_register_precmd
 
 unset WAKETRAIL_LAST_COMMAND
