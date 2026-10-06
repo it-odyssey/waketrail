@@ -243,23 +243,27 @@ func terraformTimelineEvent(
 	}
 
 	var (
-		summary terraformcollector.ChangeSummary
-		err     error
-		label   string
+		summary   terraformcollector.ChangeSummary
+		err       error
+		eventType string
+		label     string
 	)
 
 	switch subcommand {
 	case "plan":
 		summary, err = terraformcollector.ParsePlan(output)
-		label = "Planned"
+		eventType = "plan"
+		label = "Proposed"
 
 	case "apply":
 		summary, err = terraformcollector.ParseApply(output)
-		label = "Applied"
+		eventType = "apply"
+		label = "Changes"
 
 	case "destroy":
 		summary, err = terraformcollector.ParseDestroy(output)
-		label = "Destroyed"
+		eventType = "destroy"
+		label = "Changes"
 
 	default:
 		return storage.TimelineEvent{}, false
@@ -275,7 +279,7 @@ func terraformTimelineEvent(
 
 	return storage.TimelineEvent{
 		SessionID:    &sessionID,
-		EventType:    "state_change",
+		EventType:    eventType,
 		Source:       "terraform",
 		ResourceType: "deployment",
 		Resource:     resource,

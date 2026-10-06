@@ -1014,6 +1014,36 @@ func printPrettyTimelineEvent(
 			"✎",
 		)
 
+	case "plan":
+		printEventCard(
+			renderer,
+			event,
+			command,
+			"Terraform: PLAN",
+			ui.State,
+			"◇",
+		)
+
+	case "apply":
+		printEventCard(
+			renderer,
+			event,
+			command,
+			"Terraform: APPLY",
+			ui.Recovery,
+			"✓",
+		)
+
+	case "destroy":
+		printEventCard(
+			renderer,
+			event,
+			command,
+			"Terraform: DESTROY",
+			ui.Muted,
+			"■",
+		)
+
 	case "state_change":
 		printEventCard(
 			renderer,
@@ -1165,6 +1195,33 @@ func formatEventBody(
 
 	resource := timelineResourceName(event)
 	summary := timelineDisplaySummary(event)
+
+	if event.Source == "terraform" && resource != "" {
+		resourceLabel := displayResourceType(
+			event.ResourceType,
+		)
+
+		name := renderer.NewStyle().
+			Bold(true).
+			Foreground(ui.Accent).
+			Render(resource)
+
+		body := sourceStyle.Render(
+			resourceLabel+": ",
+		) + name +
+			"\n" +
+			bodyStyle.Render(
+				formatTransitionArrow(summary),
+			)
+
+		if command != nil {
+			body += "\n" +
+				sourceStyle.Render("command · ") +
+				bodyStyle.Render(command.Command)
+		}
+
+		return body
+	}
 
 	var body string
 
