@@ -429,29 +429,55 @@ func normalizedTimelineEventType(event storage.TimelineEvent) string {
 			return "removed"
 		}
 	}
-	// A newly started pod may be Running but not Ready yet; it has not
-	// necessarily failed. Preserve the original classification in storage.
-	if event.Source == "kubernetes" && event.ResourceType == "pod" &&
-		event.EventType == "failure" &&
-		strings.Contains(event.Summary, " → Running ready 0/") &&
-		!strings.Contains(event.Summary, "CrashLoopBackOff") &&
-		!strings.Contains(event.Summary, "ImagePullBackOff") {
-		return "state_change"
+	if event.Source != "kubernetes" || (event.EventType != "failure" && event.EventType != "recovery") {
+		return event.EventType
 	}
-	// Readiness improvements during rollout are not necessarily recovery
-	// from an incident. Keep the captured classifications unchanged.
-	if event.Source == "kubernetes" && event.EventType == "recovery" {
-		summary := formatTransitionArrow(event.Summary)
-		if event.ResourceType == "pod" && strings.Contains(summary, "Running ready 0/") &&
-			strings.Contains(summary, "→ Running ready 1/") {
+	summary := formatTransitionArrow(timelineDisplaySummary(event))
+	previous := strings.SplitN(summary, " → ", 2)[0]
+	// Only definitive health signals can establish an incident. A controller
+	// with fewer available replicas during a rollout is not itself failed.
+	switch event.ResourceType {
+	case "pod":
+		if event.EventType == "failure" && !kubernetesPodError(strings.TrimPrefix(summary, previous+" → ")) {
 			return "state_change"
 		}
-		if (event.ResourceType == "deployment" || event.ResourceType == "statefulset" || event.ResourceType == "daemonset") &&
-			strings.Contains(summary, "ready 0 available 0 →") && strings.Contains(summary, "ready 1 available 1") {
+		if event.EventType == "recovery" && !kubernetesPodError(previous) {
+			return "state_change"
+		}
+	case "deployment", "statefulset":
+		return "state_change"
+	case "daemonset":
+		// Misscheduled Pods are definitive; ordinary convergence is not.
+		if event.EventType == "failure" && !hasMisscheduled(strings.TrimPrefix(summary, previous+" → ")) {
+			return "state_change"
+		}
+		if event.EventType == "recovery" && !hasMisscheduled(previous) {
 			return "state_change"
 		}
 	}
 	return event.EventType
+}
+
+func kubernetesPodError(summary string) bool {
+	for _, marker := range []string{"CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull", "CreateContainerConfigError", "CreateContainerError", "OOMKilled", "Failed", "Unknown", "/Error"} {
+		if strings.Contains(summary, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasMisscheduled(summary string) bool {
+	// Counts only explicit nonzero misscheduling, never absence of the field.
+	for _, segment := range strings.Split(summary, " → ") {
+		fields := strings.Fields(segment)
+		for i := 0; i+1 < len(fields); i++ {
+			if fields[i] == "misscheduled" && fields[i+1] != "0" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func printPrettyActivity(renderer *lipgloss.Renderer, activity displayActivity) {
@@ -459,8 +485,15 @@ func printPrettyActivity(renderer *lipgloss.Renderer, activity displayActivity) 
 	switch activity.EventType {
 	case "failure":
 		color, symbol = ui.Failure, "✗"
-	case "recovery", "apply":
+	case "recovery":
 		color, symbol = ui.Recovery, "✓"
+	case "apply":
+		result := summarizeKubernetesRollout(activity)
+		if result.Controllers > 0 && result.ControllersReady == result.Controllers && (result.Pods == 0 || result.PodsReady == result.Pods) && result.Incidents == 0 {
+			color, symbol = ui.Recovery, "✓"
+		} else {
+			color, symbol = ui.State, "◇"
+		}
 	}
 	fields := []cardField{{Label: displayResourceType(activity.ResourceType), Value: activity.Resource}}
 	if activity.EventType == "apply" && activity.ResourceType == "namespace" {
@@ -488,6 +521,7 @@ func printPrettyActivity(renderer *lipgloss.Renderer, activity displayActivity) 
 			}
 		}
 		fields = append(fields, cardField{Label: "Status", Value: status})
+		fields = append(fields, cardField{Label: "Attribution", Value: "Namespace/time correlation"})
 	} else {
 		var effects strings.Builder
 		for i, effect := range summarizeActivityEffects(activity.Effects) {

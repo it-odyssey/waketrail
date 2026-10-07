@@ -232,10 +232,7 @@ func compareDeployments(
 			Transition{
 				ResourceType: "deployment",
 				Resource:     name,
-				EventType: classifyHealthTransition(
-					deploymentFailed(previousState),
-					deploymentFailed(currentState),
-				),
+				EventType:    EventStateChange,
 				Summary: fmt.Sprintf(
 					"%s -> %s",
 					describeDeployment(previousState),
@@ -322,10 +319,7 @@ func compareStatefulSets(
 			Transition{
 				ResourceType: "statefulset",
 				Resource:     name,
-				EventType: classifyHealthTransition(
-					statefulSetFailed(previousState),
-					statefulSetFailed(currentState),
-				),
+				EventType:    EventStateChange,
 				Summary: fmt.Sprintf(
 					"%s -> %s",
 					describeStatefulSet(previousState),
@@ -556,13 +550,12 @@ func podFailed(pod PodState) bool {
 		"ErrImagePull",
 		"CreateContainerConfigError",
 		"CreateContainerError",
+		"OOMKilled",
 		"Error":
 		return true
 	}
 
-	return pod.Phase == "Running" &&
-		pod.Total > 0 &&
-		pod.Ready < pod.Total
+	return false // Readiness lag alone is not evidence of a failed Pod.
 }
 
 func deploymentFailed(
@@ -596,14 +589,7 @@ func daemonSetFailed(
 		return true
 	}
 
-	if daemonSet.Desired == 0 {
-		return false
-	}
-
-	return daemonSet.Ready <
-		daemonSet.Desired ||
-		daemonSet.Available <
-			daemonSet.Desired
+	return false // Missing replicas during a rollout are not a confirmed incident.
 }
 
 func nodeFailed(node NodeState) bool {

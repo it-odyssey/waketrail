@@ -344,7 +344,7 @@ func activityEventType(
 	hasFailure := false
 
 	for _, effect := range effects {
-		switch effect.EventType {
+		switch normalizedTimelineEventType(effect) {
 		case "recovery":
 			// If the activity experienced a transient failure but
 			// recovered during the same operation, present the final

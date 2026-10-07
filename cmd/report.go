@@ -32,7 +32,7 @@ func printReport(
 		Border(summaryBorder).
 		BorderForeground(ui.Muted).
 		Padding(0, 1).
-		Width(collectorCardWidth)
+		Width(collectorCardWidth + 14)
 
 	failureCount := 0
 	recoveryCount := 0
@@ -129,11 +129,10 @@ func printReport(
 	for i, event := range events {
 		switch event.Kind {
 		case "command":
-			printPrettyCommand(
-				renderer,
-				store,
-				*event.CommandEvent,
-			)
+			if !showVerbose && printPodObservation(renderer, store, *event.CommandEvent) {
+				break
+			}
+			printPrettyCommand(renderer, store, *event.CommandEvent)
 
 		case "timeline":
 			printPrettyTimelineEvent(

@@ -76,7 +76,7 @@ func TestComparePodRecovery(t *testing.T) {
 	)
 }
 
-func TestCompareDeploymentFailure(t *testing.T) {
+func TestCompareDeploymentReadinessChange(t *testing.T) {
 	previous := Snapshot{
 		Deployments: []DeploymentState{
 			{
@@ -110,11 +110,11 @@ func TestCompareDeploymentFailure(t *testing.T) {
 		transitions,
 		"deployment",
 		"default/api",
-		EventFailure,
+		EventStateChange,
 	)
 }
 
-func TestCompareStatefulSetRecovery(t *testing.T) {
+func TestCompareStatefulSetReadinessProgress(t *testing.T) {
 	previous := Snapshot{
 		StatefulSets: []StatefulSetState{
 			{
@@ -148,7 +148,7 @@ func TestCompareStatefulSetRecovery(t *testing.T) {
 		transitions,
 		"statefulset",
 		"data/postgres",
-		EventRecovery,
+		EventStateChange,
 	)
 }
 
@@ -298,4 +298,11 @@ func assertSingleTransition(
 			eventType,
 		)
 	}
+}
+
+func TestPodReadinessLagIsNotFailure(t *testing.T) {
+	previous := Snapshot{Pods: []PodState{{Namespace: "default", Name: "api", Phase: "Pending", Total: 1}}}
+	current := Snapshot{Pods: []PodState{{Namespace: "default", Name: "api", Phase: "Running", Ready: 0, Total: 1}}}
+	transitions := Compare(previous, current)
+	assertSingleTransition(t, transitions, "pod", "default/api", EventStateChange)
 }

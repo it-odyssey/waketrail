@@ -208,6 +208,9 @@ func buildMarkdownExport(
 	for _, event := range events {
 		switch event.Kind {
 		case "command":
+			if writeMarkdownPodObservation(&builder, store, *event.CommandEvent) {
+				break
+			}
 			if err := writeMarkdownCommand(
 				&builder,
 				store,

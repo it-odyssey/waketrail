@@ -93,9 +93,9 @@ func TestGroupKubernetesScaleActivity(
 		t.Fatal("expected grouped activity")
 	}
 
-	if activity.EventType != "recovery" {
+	if activity.EventType != "state_change" {
 		t.Fatalf(
-			"EventType = %q, want recovery",
+			"EventType = %q, want state_change",
 			activity.EventType,
 		)
 	}
