@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	gitcollector "github.com/it-odyssey/waketrail/internal/collectors/git"
 	"github.com/it-odyssey/waketrail/internal/storage"
 	"path/filepath"
 	"strings"
@@ -412,4 +413,43 @@ func isShellHousekeepingCommand(
 			path,
 			"/bin/env",
 		)
+}
+
+// correlateGitEvents replaces an eligible successful command with its verified
+// repository transitions. Multiple transitions can share the same command.
+func correlateGitEvents(events []displayEvent) []displayEvent {
+	matched := make(map[*storage.CommandEvent]bool)
+	for i := range events {
+		item := &events[i]
+		if item.Kind != "timeline" || item.TimelineEvent == nil || item.TimelineEvent.Source != "git" {
+			continue
+		}
+		for j := i - 1; j >= 0; j-- {
+			prior := events[j]
+			if prior.Kind != "command" || prior.CommandEvent == nil {
+				continue
+			}
+			command := prior.CommandEvent
+			if item.OccurredAt.Sub(command.EndedAt) > 3*time.Second {
+				break
+			}
+			if command.ExitCode != 0 || command.EndedAt.After(item.OccurredAt) {
+				continue
+			}
+			if !gitcollector.MutatingCommand(command.Command) {
+				continue
+			}
+			item.CorrelatedCommand = command
+			matched[command] = true
+			break
+		}
+	}
+	result := make([]displayEvent, 0, len(events))
+	for _, item := range events {
+		if item.Kind == "command" && matched[item.CommandEvent] {
+			continue
+		}
+		result = append(result, item)
+	}
+	return result
 }

@@ -65,6 +65,18 @@ __waketrail_preexec() {
         WAKETRAIL_CAPTURE_MODE="none"
     fi
 
+    # Only snapshot Git state for commands that may change it. The recorder
+    # independently checks the command and will ignore a missing snapshot.
+    case "$cmd" in
+        git\ add\ *|git\ commit\ *|git\ switch\ *|git\ checkout\ *|git\ merge\ *|git\ rebase\ *|git\ reset\ *|git\ restore\ *|git\ rm\ *|git\ mv\ *|git\ stash*|git\ cherry-pick\ *|git\ revert\ *|git\ pull*)
+            WAKETRAIL_GIT_BEFORE_FILE="$(mktemp "${TMPDIR:-/tmp}/waketrail-git.XXXXXX")"
+            waketrail git-snapshot --cwd "$PWD" --output "$WAKETRAIL_GIT_BEFORE_FILE" >/dev/null 2>&1 || {
+                rm -f "$WAKETRAIL_GIT_BEFORE_FILE"
+                unset WAKETRAIL_GIT_BEFORE_FILE
+            }
+            ;;
+    esac
+
     WAKETRAIL_COMMAND_STARTED_AT="$(date +%s%N)"
 
     if [[ "$WAKETRAIL_CAPTURE_MODE" == "output" ||
@@ -105,6 +117,10 @@ __waketrail_precmd() {
             fi
         fi
 
+        if [[ -n "${WAKETRAIL_GIT_BEFORE_FILE:-}" ]]; then
+            record_args+=(--git-before-file "$WAKETRAIL_GIT_BEFORE_FILE")
+        fi
+
         waketrail record \
             "${record_args[@]}" \
             "$WAKETRAIL_LAST_COMMAND" \
@@ -118,6 +134,10 @@ __waketrail_precmd() {
             rm -f "$WAKETRAIL_STDERR_FILE"
         fi
 
+        if [[ -n "${WAKETRAIL_GIT_BEFORE_FILE:-}" ]]; then
+            rm -f "$WAKETRAIL_GIT_BEFORE_FILE"
+        fi
+        unset WAKETRAIL_GIT_BEFORE_FILE
         unset WAKETRAIL_LAST_COMMAND
         unset WAKETRAIL_COMMAND_STARTED_AT
         unset WAKETRAIL_CAPTURE_MODE

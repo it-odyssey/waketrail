@@ -21,6 +21,7 @@ func buildDisplayEvents(commands []storage.CommandEvent, timeline []storage.Time
 	events = correlateLifecycleEvents(events)
 	if !verbose {
 		events = correlateTerraformEvents(events)
+		events = correlateGitEvents(events)
 		events = groupKubernetesActivities(events)
 		events = filterWakeTrailCommands(events)
 	}

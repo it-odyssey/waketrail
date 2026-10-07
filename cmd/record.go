@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,13 +18,14 @@ import (
 )
 
 var (
-	recordCwd         string
-	recordExitCode    int
-	recordCaptureMode string
-	recordStartedAt   int64
-	recordEndedAt     int64
-	recordStdoutFile  string
-	recordStderrFile  string
+	recordCwd           string
+	recordExitCode      int
+	recordCaptureMode   string
+	recordStartedAt     int64
+	recordEndedAt       int64
+	recordStdoutFile    string
+	recordStderrFile    string
+	recordGitBeforeFile string
 )
 
 var recordCmd = &cobra.Command{
@@ -109,6 +111,29 @@ var recordCmd = &cobra.Command{
 		gitContext, err := gitcollector.Detect(recordCwd)
 		if err != nil {
 			return err
+		}
+
+		// A pre-command snapshot is supplied only for eligible Git mutations.
+		// Comparing the two snapshots avoids attributing unrelated repository
+		// changes merely because they occurred near a shell command.
+		if sessionID != nil && recordGitBeforeFile != "" && gitcollector.MutatingCommand(args[0]) && recordExitCode == 0 {
+			data, readErr := os.ReadFile(recordGitBeforeFile)
+			if readErr == nil {
+				var before gitcollector.Context
+				if json.Unmarshal(data, &before) == nil {
+					for _, change := range gitcollector.Compare(args[0], before, gitContext) {
+						_, insertErr := store.InsertTimelineEvent(storage.TimelineEvent{
+							SessionID: sessionID, EventType: change.Kind,
+							Source: "git", ResourceType: "repository",
+							Resource: redact.String(change.Resource), Summary: redact.String(change.Summary),
+							OccurredAt: event.EndedAt,
+						})
+						if insertErr != nil {
+							return insertErr
+						}
+					}
+				}
+			}
 		}
 
 		if gitContext.IsRepository {
@@ -351,6 +376,7 @@ func init() {
 		"path to captured stdout",
 	)
 
+	recordCmd.Flags().StringVar(&recordGitBeforeFile, "git-before-file", "", "Pre-command Git metadata snapshot")
 	recordCmd.Flags().StringVar(
 		&recordStderrFile,
 		"stderr-file",

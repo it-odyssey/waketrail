@@ -228,6 +228,10 @@ func timelineCardFields(
 		summary,
 	)
 
+	if event.Source == "git" {
+		effectLabel = "Change"
+	}
+
 	if event.Source == "terraform" {
 		switch {
 		case strings.HasPrefix(
@@ -372,6 +376,13 @@ func printPrettyTimelineEvent(
 	case "recovery":
 		color = ui.Recovery
 		symbol = "✓"
+
+	case "commit":
+		color = ui.Recovery
+		symbol = "✓"
+	case "head_changed", "branch_switch", "working_tree", "files_changed":
+		color = ui.State
+		symbol = "↻"
 
 	case "created":
 		color = ui.State
