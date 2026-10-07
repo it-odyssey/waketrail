@@ -11,6 +11,8 @@ const (
 	EventRecovery    = "recovery"
 	EventStopped     = "stopped"
 	EventStarted     = "started"
+	EventCreated     = "created"
+	EventRemoved     = "removed"
 )
 
 type Transition struct {
@@ -36,7 +38,7 @@ func Compare(
 		if !existed {
 			transitions = append(transitions, Transition{
 				Name:      name,
-				EventType: EventStateChange,
+				EventType: EventCreated,
 				Current:   currentState,
 				Summary: fmt.Sprintf(
 					"%s appeared: %s",
@@ -78,7 +80,7 @@ func Compare(
 
 		transitions = append(transitions, Transition{
 			Name:      name,
-			EventType: EventStateChange,
+			EventType: EventRemoved,
 			Previous:  previousState,
 			Summary: fmt.Sprintf(
 				"%s disappeared",

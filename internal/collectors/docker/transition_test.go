@@ -155,11 +155,11 @@ func TestCompareDetectsNewContainer(t *testing.T) {
 		)
 	}
 
-	if transitions[0].EventType != EventStateChange {
+	if transitions[0].EventType != EventCreated {
 		t.Errorf(
 			"EventType = %q, want %q",
 			transitions[0].EventType,
-			EventStateChange,
+			EventCreated,
 		)
 	}
 

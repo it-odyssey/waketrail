@@ -262,7 +262,10 @@ func isLifecycleEvent(
 	}
 
 	switch event.TimelineEvent.EventType {
-	case "started", "stopped":
+	case "created",
+		"removed",
+		"started",
+		"stopped":
 		return true
 
 	default:
@@ -303,32 +306,96 @@ func dockerCommandMatchesLifecycle(
 	}
 
 	fields := strings.Fields(command.Command)
-
 	fields = stripCommandPrefixes(fields)
 
-	if len(fields) < 3 ||
+	if len(fields) < 2 ||
 		filepath.Base(fields[0]) != "docker" {
 		return false
 	}
 
-	expectedAction := ""
-
 	switch event.EventType {
+	case "created":
+		return dockerCommandCreatesContainer(
+			fields,
+			containerName,
+		)
+
+	case "removed":
+		return dockerCommandRemovesContainer(
+			fields,
+			containerName,
+		)
+
 	case "stopped":
-		expectedAction = "stop"
+		return len(fields) >= 3 &&
+			fields[1] == "stop" &&
+			fields[len(fields)-1] == containerName
 
 	case "started":
-		expectedAction = "start"
+		return len(fields) >= 3 &&
+			fields[1] == "start" &&
+			fields[len(fields)-1] == containerName
 
 	default:
 		return false
 	}
+}
 
-	if fields[1] != expectedAction {
+func dockerCommandCreatesContainer(
+	fields []string,
+	containerName string,
+) bool {
+	if len(fields) < 2 {
 		return false
 	}
 
-	return fields[len(fields)-1] == containerName
+	switch fields[1] {
+	case "run", "create":
+	default:
+		return false
+	}
+
+	for i := 2; i < len(fields); i++ {
+		if fields[i] == "--name" &&
+			i+1 < len(fields) {
+			return fields[i+1] == containerName
+		}
+
+		if strings.HasPrefix(
+			fields[i],
+			"--name=",
+		) {
+			return strings.TrimPrefix(
+				fields[i],
+				"--name=",
+			) == containerName
+		}
+	}
+
+	return false
+}
+
+func dockerCommandRemovesContainer(
+	fields []string,
+	containerName string,
+) bool {
+	if len(fields) < 3 {
+		return false
+	}
+
+	if fields[1] == "rm" {
+		return fields[len(fields)-1] ==
+			containerName
+	}
+
+	if len(fields) >= 4 &&
+		fields[1] == "container" &&
+		fields[2] == "rm" {
+		return fields[len(fields)-1] ==
+			containerName
+	}
+
+	return false
 }
 
 func systemdCommandMatchesLifecycle(
@@ -963,48 +1030,7 @@ func printPrettyTimelineEvent(
 	event storage.TimelineEvent,
 	command *storage.CommandEvent,
 ) {
-	switch event.EventType {
-	case "failure":
-		printEventCard(
-			renderer,
-			event,
-			command,
-			"FAILURE",
-			ui.Failure,
-			"✗",
-		)
-
-	case "recovery":
-		printEventCard(
-			renderer,
-			event,
-			command,
-			"RECOVERY",
-			ui.Recovery,
-			"✓",
-		)
-
-	case "stopped":
-		printEventCard(
-			renderer,
-			event,
-			command,
-			"STOPPED",
-			ui.Muted,
-			"■",
-		)
-
-	case "started":
-		printEventCard(
-			renderer,
-			event,
-			command,
-			"STARTED",
-			ui.State,
-			"▶",
-		)
-
-	case "note":
+	if event.EventType == "note" {
 		printEventCard(
 			renderer,
 			event,
@@ -1014,56 +1040,70 @@ func printPrettyTimelineEvent(
 			"✎",
 		)
 
+		return
+	}
+
+	label := strings.ToUpper(
+		strings.ReplaceAll(
+			event.EventType,
+			"_",
+			" ",
+		),
+	)
+
+	color := ui.State
+	symbol := "↻"
+
+	switch event.EventType {
+	case "failure":
+		color = ui.Failure
+		symbol = "✗"
+
+	case "recovery":
+		color = ui.Recovery
+		symbol = "✓"
+
+	case "stopped":
+		color = ui.Muted
+		symbol = "■"
+
+	case "started":
+		color = ui.State
+		symbol = "▶"
+
 	case "plan":
-		printEventCard(
-			renderer,
-			event,
-			command,
-			"Terraform: PLAN",
-			ui.State,
-			"◇",
-		)
+		color = ui.State
+		symbol = "◇"
 
 	case "apply":
-		printEventCard(
-			renderer,
-			event,
-			command,
-			"Terraform: APPLY",
-			ui.Recovery,
-			"✓",
-		)
+		color = ui.Recovery
+		symbol = "✓"
 
 	case "destroy":
-		printEventCard(
-			renderer,
-			event,
-			command,
-			"Terraform: DESTROY",
-			ui.Muted,
-			"■",
-		)
+		color = ui.Muted
+		symbol = "■"
 
-	case "state_change":
-		printEventCard(
-			renderer,
-			event,
-			command,
-			"STATE CHANGE",
-			ui.State,
-			"↻",
-		)
+	case "created":
+		color = ui.State
+		symbol = "+"
 
-	default:
-		printEventCard(
-			renderer,
-			event,
-			command,
-			strings.ToUpper(event.EventType),
-			ui.Accent,
-			"•",
-		)
+	case "removed":
+		color = ui.Muted
+		symbol = "−"
 	}
+
+	printCollectorCard(
+		renderer,
+		event.OccurredAt,
+		event.Source,
+		label,
+		color,
+		symbol,
+		timelineCardFields(
+			event,
+			command,
+		),
+	)
 }
 
 func printEventCard(
