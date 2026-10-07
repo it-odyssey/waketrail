@@ -147,6 +147,12 @@ func timelineCardFields(
 ) []cardField {
 	resource := timelineResourceName(event)
 	summary := timelineDisplaySummary(event)
+	if event.Source == "docker" {
+		resourcePrefix := resource + " "
+		if strings.HasPrefix(summary, resourcePrefix) {
+			summary = strings.TrimPrefix(summary, resourcePrefix)
+		}
+	}
 
 	var fields []cardField
 
@@ -212,4 +218,199 @@ func timelineCardFields(
 	}
 
 	return fields
+}
+
+// Notes intentionally use a distinct simple card rather than a collector header.
+func printNoteCard(renderer *lipgloss.Renderer, event storage.TimelineEvent) {
+	style := renderer.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(ui.Note).Padding(0, 1).Width(62)
+	fmt.Printf("  %s  %s %s\n", renderer.NewStyle().Foreground(ui.Muted).Render(event.OccurredAt.Format("15:04:05")),
+		renderer.NewStyle().Foreground(ui.Note).Render("✎"), renderer.NewStyle().Foreground(ui.Note).Bold(true).Render("NOTE"))
+	card := style.Render(renderer.NewStyle().Foreground(ui.Accent).Render(event.Summary))
+	for _, line := range strings.Split(card, "\n") {
+		fmt.Printf("  │           %s\n", line)
+	}
+}
+
+func timelineResourceName(
+	event storage.TimelineEvent,
+) string {
+	if event.Resource != "" {
+		return event.Resource
+	}
+
+	parts := strings.SplitN(
+		event.Summary,
+		": ",
+		2,
+	)
+
+	if len(parts) == 2 {
+		return parts[0]
+	}
+
+	return ""
+}
+
+func timelineDisplaySummary(
+	event storage.TimelineEvent,
+) string {
+	if event.Resource != "" {
+		prefix := event.Resource + ": "
+
+		if strings.HasPrefix(
+			event.Summary,
+			prefix,
+		) {
+			return strings.TrimPrefix(
+				event.Summary,
+				prefix,
+			)
+		}
+
+		return event.Summary
+	}
+
+	parts := strings.SplitN(
+		event.Summary,
+		": ",
+		2,
+	)
+
+	if len(parts) == 2 {
+		return parts[1]
+	}
+
+	return event.Summary
+}
+
+func formatTransitionArrow(
+	value string,
+) string {
+	return strings.ReplaceAll(
+		value,
+		" -> ",
+		" → ",
+	)
+}
+
+func printPrettyTimelineEvent(
+	renderer *lipgloss.Renderer,
+	event storage.TimelineEvent,
+	command *storage.CommandEvent,
+) {
+	if event.EventType == "note" {
+		printNoteCard(renderer, event)
+		return
+	}
+
+	kind := normalizedTimelineEventType(event)
+	label := strings.ToUpper(strings.ReplaceAll(kind, "_", " "))
+
+	color := ui.State
+	symbol := "↻"
+
+	switch kind {
+	case "failure":
+		color = ui.Failure
+		symbol = "✗"
+
+	case "recovery":
+		color = ui.Recovery
+		symbol = "✓"
+
+	case "created":
+		color = ui.State
+		symbol = "+"
+
+	case "removed":
+		color = ui.Muted
+		symbol = "−"
+
+	case "stopped":
+		color = ui.Muted
+		symbol = "■"
+
+	case "started":
+		color = ui.State
+		symbol = "▶"
+
+	case "plan":
+		color = ui.State
+		symbol = "◇"
+
+	case "apply":
+		color = ui.Recovery
+		symbol = "✓"
+
+	case "destroy":
+		color = ui.Muted
+		symbol = "■"
+
+	}
+
+	printCollectorCard(
+		renderer,
+		event.OccurredAt,
+		event.Source,
+		label,
+		color,
+		symbol,
+		timelineCardFields(
+			event,
+			command,
+		),
+	)
+}
+
+// normalizedTimelineEventType improves the presentation of older SQLite rows
+// without mutating the forensic event stored during recording.
+func normalizedTimelineEventType(event storage.TimelineEvent) string {
+	if event.Source == "docker" && event.EventType == "state_change" {
+		summary := timelineDisplaySummary(event)
+		if strings.Contains(summary, "appeared:") {
+			return "created"
+		}
+		if strings.HasSuffix(summary, "disappeared") {
+			return "removed"
+		}
+	}
+	// A newly started pod may be Running but not Ready yet; it has not
+	// necessarily failed. Preserve the original classification in storage.
+	if event.Source == "kubernetes" && event.ResourceType == "pod" &&
+		event.EventType == "failure" &&
+		strings.Contains(event.Summary, " → Running ready 0/") &&
+		!strings.Contains(event.Summary, "CrashLoopBackOff") &&
+		!strings.Contains(event.Summary, "ImagePullBackOff") {
+		return "state_change"
+	}
+	return event.EventType
+}
+
+func printPrettyActivity(renderer *lipgloss.Renderer, activity displayActivity) {
+	color, symbol := ui.State, "↻"
+	switch activity.EventType {
+	case "failure":
+		color, symbol = ui.Failure, "✗"
+	case "recovery":
+		color, symbol = ui.Recovery, "✓"
+	case "apply":
+		color, symbol = ui.Recovery, "✓"
+	}
+	fields := []cardField{{Label: displayResourceType(activity.ResourceType), Value: activity.Resource}}
+	var effects strings.Builder
+	for i, effect := range summarizeActivityEffects(activity.Effects) {
+		if i > 0 {
+			effects.WriteString("\n")
+		}
+		fmt.Fprintf(&effects, "%s: %s\n", displayResourceType(effect.ResourceType), effect.Resource)
+		for _, line := range formatActivityEffectLines(effect) {
+			fmt.Fprintf(&effects, "  %s\n", line)
+		}
+	}
+	fields = append(fields, cardField{Label: "Effects", Value: strings.TrimSuffix(effects.String(), "\n")})
+	if activity.Command != nil {
+		fields = append(fields, cardField{Label: "Command", Value: activity.Command.Command})
+	}
+	printCollectorCard(renderer, activity.OccurredAt, activity.Source,
+		strings.ToUpper(strings.ReplaceAll(activity.EventType, "_", " ")), color, symbol, fields)
 }

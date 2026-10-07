@@ -103,55 +103,9 @@ var exportCmd = &cobra.Command{
 	},
 }
 
-func buildExportEvents(
-	commandEvents []storage.CommandEvent,
-	timelineEvents []storage.TimelineEvent,
-) []displayEvent {
-	events := make(
-		[]displayEvent,
-		0,
-		len(commandEvents)+len(timelineEvents),
-	)
-
-	for i := range commandEvents {
-		event := &commandEvents[i]
-
-		events = append(events, displayEvent{
-			OccurredAt:   event.StartedAt,
-			Kind:         "command",
-			CommandEvent: event,
-		})
-	}
-
-	for i := range timelineEvents {
-		event := &timelineEvents[i]
-
-		events = append(events, displayEvent{
-			OccurredAt:    event.OccurredAt,
-			Kind:          "timeline",
-			TimelineEvent: event,
-		})
-	}
-
-	sortDisplayEvents(events)
-
-	events = correlateLifecycleEvents(events)
-	events = correlateTerraformEvents(events)
-	events = groupKubernetesActivities(events)
-
-	return filterWakeTrailCommands(events)
-}
-
-func sortDisplayEvents(events []displayEvent) {
-	for i := 1; i < len(events); i++ {
-		for j := i; j > 0 &&
-			events[j].OccurredAt.Before(
-				events[j-1].OccurredAt,
-			); j-- {
-			events[j], events[j-1] =
-				events[j-1], events[j]
-		}
-	}
+// buildExportEvents shares display-time attribution with the terminal report.
+func buildExportEvents(commands []storage.CommandEvent, timeline []storage.TimelineEvent) []displayEvent {
+	return buildDisplayEvents(commands, timeline, false)
 }
 
 func buildMarkdownExport(
@@ -167,7 +121,7 @@ func buildMarkdownExport(
 	noteCount := 0
 
 	for _, event := range timelineEvents {
-		switch event.EventType {
+		switch normalizedTimelineEventType(event) {
 		case "failure":
 			failureCount++
 
@@ -466,7 +420,7 @@ func writeMarkdownTimelineEvent(
 ) {
 	label := strings.ToUpper(
 		strings.ReplaceAll(
-			event.EventType,
+			normalizedTimelineEventType(event),
 			"_",
 			" ",
 		),

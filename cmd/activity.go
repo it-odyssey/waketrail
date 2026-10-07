@@ -22,6 +22,7 @@ type displayActivity struct {
 }
 
 type kubernetesCommandTarget struct {
+	Operation    string
 	ResourceType string
 	Resource     string
 	Namespace    string
@@ -36,7 +37,11 @@ func groupKubernetesActivities(
 		len(events),
 	)
 
+	consumed := make(map[int]bool)
 	for i := 0; i < len(events); i++ {
+		if consumed[i] {
+			continue
+		}
 		event := events[i]
 
 		if event.Kind != "command" ||
@@ -53,19 +58,32 @@ func groupKubernetesActivities(
 			continue
 		}
 
+		// Failed commands cannot have a successful apply activity.
+		if event.CommandEvent.ExitCode != 0 {
+			result = append(result, event)
+			continue
+		}
 		var effects []storage.TimelineEvent
-		lastGroupedIndex := i
+		window := activityWindow
+		if target.Operation == "apply" {
+			window = 2 * time.Minute
+		}
 
 		for j := i + 1; j < len(events); j++ {
 			candidate := events[j]
 
-			if candidate.Kind == "command" {
-				break
+			// Other commands do not invalidate observations already underway.
+			// A later mutating Kubernetes command, however, ends attribution.
+			if candidate.Kind == "command" && candidate.CommandEvent != nil {
+				if nextTarget, ok := kubernetesTargetFromCommand(candidate.CommandEvent.Command); ok && nextTarget.Operation != "" {
+					break
+				}
+				continue
 			}
 
 			if candidate.OccurredAt.Sub(
 				event.CommandEvent.EndedAt,
-			) > activityWindow {
+			) > window {
 				break
 			}
 
@@ -86,7 +104,7 @@ func groupKubernetesActivities(
 				*candidate.TimelineEvent,
 			)
 
-			lastGroupedIndex = j
+			consumed[j] = true
 		}
 
 		if len(effects) == 0 {
@@ -95,9 +113,13 @@ func groupKubernetesActivities(
 		}
 
 		resource := target.Resource
+		resourceType := target.ResourceType
+		if target.Operation == "apply" {
+			resourceType, resource = "namespace", target.Namespace
+		}
 
 		for _, effect := range effects {
-			if effect.ResourceType ==
+			if target.Operation != "apply" && effect.ResourceType ==
 				target.ResourceType {
 				resource = effect.Resource
 				break
@@ -108,12 +130,15 @@ func groupKubernetesActivities(
 			OccurredAt:   event.CommandEvent.StartedAt,
 			Source:       "kubernetes",
 			EventType:    activityEventType(effects),
-			ResourceType: target.ResourceType,
+			ResourceType: resourceType,
 			Resource:     resource,
 			Command:      event.CommandEvent,
 			Effects:      effects,
 		}
 
+		if target.Operation == "apply" {
+			activity.EventType = "apply"
+		}
 		result = append(
 			result,
 			displayEvent{
@@ -123,7 +148,6 @@ func groupKubernetesActivities(
 			},
 		)
 
-		i = lastGroupedIndex
 	}
 
 	return result
@@ -143,6 +167,13 @@ func kubernetesTargetFromCommand(
 	namespace := namespaceFromKubectlFields(fields)
 
 	switch fields[1] {
+	case "apply":
+		// Only namespace-scoped Kubernetes observations can be safely tied
+		// to an apply without parsing the referenced manifest or owner UIDs.
+		if namespace == "" {
+			return kubernetesCommandTarget{}, false
+		}
+		return kubernetesCommandTarget{Operation: "apply", Namespace: namespace, ResourceType: "namespace", Resource: namespace}, true
 	case "scale":
 		return parseKubernetesScaleTarget(
 			fields,
@@ -189,6 +220,7 @@ func parseKubernetesScaleTarget(
 	}
 
 	return kubernetesCommandTarget{
+		Operation:    "scale",
 		ResourceType: resourceType,
 		Resource:     resource,
 		Namespace:    namespace,
@@ -256,6 +288,9 @@ func kubernetesEventMatchesTarget(
 	if event.Source != "kubernetes" {
 		return false
 	}
+	if target.Operation == "apply" && event.ResourceType != "pod" && event.ResourceType != "deployment" && event.ResourceType != "statefulset" && event.ResourceType != "daemonset" {
+		return false
+	}
 
 	resourceNamespace, resourceName :=
 		splitKubernetesResource(event.Resource)
@@ -265,6 +300,9 @@ func kubernetesEventMatchesTarget(
 		return false
 	}
 
+	if target.Operation == "apply" {
+		return true
+	}
 	if event.ResourceType ==
 		target.ResourceType {
 		return resourceName == target.Resource
@@ -495,6 +533,13 @@ func formatControllerEffectLines(
 	// The normal report cares about the net result of the activity.
 	// Intermediate controller states remain available in verbose/raw
 	// output, but here we compare the first observed state to the last.
+	appeared := states[0] == "Appeared"
+	if appeared {
+		states = states[1:]
+	}
+	if len(states) == 0 {
+		return []string{"Appeared"}
+	}
 	before := parseStateFields(
 		states[0],
 	)
@@ -513,6 +558,9 @@ func formatControllerEffectLines(
 	}
 
 	var lines []string
+	if appeared {
+		lines = append(lines, "Appeared")
+	}
 
 	for _, field := range order {
 		beforeValue, beforeExists :=
