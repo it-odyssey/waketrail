@@ -632,3 +632,55 @@ func formatProgressionLines(
 
 	return lines
 }
+
+// kubernetesRolloutSummary summarizes only resources actually observed by
+// the collector. These counts do not assert cluster-wide completeness.
+type kubernetesRolloutSummary struct {
+	Controllers, ControllersReady int
+	Pods, PodsReady               int
+	Incidents                     int
+	First, Last                   time.Time
+}
+
+func summarizeKubernetesRollout(activity displayActivity) kubernetesRolloutSummary {
+	var result kubernetesRolloutSummary
+	for _, event := range activity.Effects {
+		if normalizedTimelineEventType(event) == "failure" {
+			result.Incidents++
+		}
+		if result.First.IsZero() || event.OccurredAt.Before(result.First) {
+			result.First = event.OccurredAt
+		}
+		if result.Last.IsZero() || event.OccurredAt.After(result.Last) {
+			result.Last = event.OccurredAt
+		}
+	}
+	for _, effect := range summarizeActivityEffects(activity.Effects) {
+		states := strings.Split(effect.Summary, " → ")
+		last := states[len(states)-1]
+		switch effect.ResourceType {
+		case "deployment", "statefulset", "daemonset":
+			result.Controllers++
+			fields := parseStateFields(last)
+			desired, desiredOK := fields["desired"]
+			ready, readyOK := fields["ready"]
+			available, availableOK := fields["available"]
+			// A controller is counted ready only when the final observed
+			// ready and available replicas match its desired count.
+			if desiredOK && readyOK && availableOK && desired == ready && desired == available {
+				result.ControllersReady++
+			}
+		case "pod":
+			result.Pods++
+			// Running alone does not imply a ready Pod.
+			parts := strings.Fields(last)
+			if strings.HasPrefix(last, "Running ready ") && len(parts) >= 3 {
+				counts := strings.Split(parts[2], "/")
+				if len(counts) == 2 && counts[0] == counts[1] && counts[1] != "0" {
+					result.PodsReady++
+				}
+			}
+		}
+	}
+	return result
+}

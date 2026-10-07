@@ -31,8 +31,8 @@ func printReport(
 	summaryStyle := renderer.NewStyle().
 		Border(summaryBorder).
 		BorderForeground(ui.Muted).
-		Padding(0, 2).
-		Width(76)
+		Padding(0, 1).
+		Width(collectorCardWidth)
 
 	failureCount := 0
 	recoveryCount := 0
@@ -287,19 +287,11 @@ func printPrettyCommand(
 
 	if err == nil {
 		if commandOutput.Stdout != "" {
-			printOutputPreview(
-				renderer,
-				"output",
-				commandOutput.Stdout,
-			)
+			printOutputPreview(renderer, "output", commandOutput.Stdout, showVerbose, commandOutput.StdoutTruncated)
 		}
 
 		if commandOutput.Stderr != "" {
-			printOutputPreview(
-				renderer,
-				"stderr",
-				commandOutput.Stderr,
-			)
+			printOutputPreview(renderer, "stderr", commandOutput.Stderr, showVerbose, commandOutput.StderrTruncated)
 		}
 	}
 
@@ -313,59 +305,37 @@ func printPrettyCommand(
 	}
 }
 
-func printOutputPreview(
-	renderer *lipgloss.Renderer,
-	label string,
-	value string,
-) {
+func printOutputPreview(renderer *lipgloss.Renderer, label, value string, verbose, captureTruncated bool) {
 	const maxLines = 3
 	const maxChars = 240
-
-	value = strings.TrimSpace(value)
-
+	value = strings.TrimRight(value, "\n")
 	if value == "" {
 		return
 	}
-
 	lines := strings.Split(value, "\n")
-
-	truncated := false
-
-	if len(lines) > maxLines {
-		lines = lines[:maxLines]
-		truncated = true
+	previewTruncated := false
+	if !verbose {
+		if len(lines) > maxLines {
+			lines = lines[:maxLines]
+			previewTruncated = true
+		}
+		preview := strings.Join(lines, "\n")
+		if len([]rune(preview)) > maxChars {
+			preview = string([]rune(preview)[:maxChars])
+			previewTruncated = true
+		}
+		lines = strings.Split(preview, "\n")
 	}
-
-	preview := strings.Join(lines, "\n")
-
-	if len([]rune(preview)) > maxChars {
-		runes := []rune(preview)
-		preview = string(runes[:maxChars])
-		truncated = true
+	meta := renderer.NewStyle().Foreground(ui.Muted)
+	output := renderer.NewStyle().Foreground(ui.Accent)
+	fmt.Printf("  │           %s\n", meta.Render(label))
+	for _, line := range lines {
+		fmt.Printf("  │             %s\n", output.Render(line))
 	}
-
-	labelStyle := renderer.NewStyle().
-		Foreground(ui.Muted)
-
-	outputStyle := renderer.NewStyle().
-		Foreground(ui.Accent)
-
-	fmt.Printf(
-		"  │           %s\n",
-		labelStyle.Render(label),
-	)
-
-	for _, line := range strings.Split(preview, "\n") {
-		fmt.Printf(
-			"  │             %s\n",
-			outputStyle.Render(line),
-		)
+	if previewTruncated {
+		fmt.Printf("  │             %s\n", meta.Render("… preview shortened; use --verbose"))
 	}
-
-	if truncated {
-		fmt.Printf(
-			"  │             %s\n",
-			labelStyle.Render("…"),
-		)
+	if captureTruncated {
+		fmt.Printf("  │             %s\n", meta.Render("… truncated during capture; original output unavailable"))
 	}
 }

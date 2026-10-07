@@ -84,7 +84,7 @@ var exportCmd = &cobra.Command{
 		if err := os.WriteFile(
 			outputPath,
 			[]byte(content),
-			0644,
+			0600,
 		); err != nil {
 			return err
 		}
@@ -341,76 +341,31 @@ func writeMarkdownCommand(
 	return nil
 }
 
-func writeMarkdownActivity(
-	builder *strings.Builder,
-	activity displayActivity,
-) {
-	label := strings.ToUpper(
-		strings.ReplaceAll(
-			activity.EventType,
-			"_",
-			" ",
-		),
-	)
-
-	fmt.Fprintf(
-		builder,
-		"### %s: %s\n\n",
-		titleSource(activity.Source),
-		label,
-	)
-
-	fmt.Fprintf(
-		builder,
-		"&nbsp;&nbsp;&nbsp;&nbsp;**%s: `%s`**  \n",
-		displayResourceType(
-			activity.ResourceType,
-		),
-		activity.Resource,
-	)
-
-	fmt.Fprintf(
-		builder,
-		"&nbsp;&nbsp;&nbsp;&nbsp;%s: **Effects:**  \n",
-		activity.OccurredAt.Format("15:04:05"),
-	)
-
-	for i, effect := range summarizeActivityEffects(
-		activity.Effects,
-	) {
-		if i > 0 {
-			builder.WriteString("  \n")
+func writeMarkdownActivity(builder *strings.Builder, activity displayActivity) {
+	label := strings.ToUpper(strings.ReplaceAll(activity.EventType, "_", " "))
+	fmt.Fprintf(builder, "### %s: %s\n\n", titleSource(activity.Source), label)
+	fmt.Fprintf(builder, "**%s:** `%s`  \n", displayResourceType(activity.ResourceType), activity.Resource)
+	if activity.EventType == "apply" && activity.ResourceType == "namespace" {
+		result := summarizeKubernetesRollout(activity)
+		fmt.Fprintf(builder, "\n- Controllers: %d/%d observed available\n", result.ControllersReady, result.Controllers)
+		fmt.Fprintf(builder, "- Pods: %d/%d observed ready\n", result.PodsReady, result.Pods)
+		if activity.Command != nil && !result.Last.IsZero() {
+			fmt.Fprintf(builder, "- Observation window: %s\n", result.Last.Sub(activity.Command.StartedAt).Round(time.Second))
 		}
-
-		fmt.Fprintf(
-			builder,
-			"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;**%s: `%s`**  \n",
-			displayResourceType(
-				effect.ResourceType,
-			),
-			effect.Resource,
-		)
-
-		for _, line := range formatActivityEffectLines(
-			effect,
-		) {
-			fmt.Fprintf(
-				builder,
-				"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;`%s`  \n",
-				line,
-			)
+		builder.WriteString("\n*Counts reflect observed resources, not a cluster-wide inventory.*\n")
+	} else {
+		for _, effect := range summarizeActivityEffects(activity.Effects) {
+			fmt.Fprintf(builder, "\n**%s:** `%s`  \n", displayResourceType(effect.ResourceType), effect.Resource)
+			for _, line := range formatActivityEffectLines(effect) {
+				fmt.Fprintf(builder, "  \n    `%s`", line)
+			}
+			builder.WriteByte('\n')
 		}
 	}
-
 	if activity.Command != nil {
-		fmt.Fprintf(
-			builder,
-			"  \n&nbsp;&nbsp;&nbsp;&nbsp;**Command:** `%s`\n\n",
-			activity.Command.Command,
-		)
+		fmt.Fprintf(builder, "\n**Command:** `%s`\n", activity.Command.Command)
 	}
-
-	builder.WriteString("---\n\n")
+	builder.WriteString("\n---\n\n")
 }
 
 func writeMarkdownTimelineEvent(

@@ -72,73 +72,128 @@ func printCollectorCard(
 	}
 }
 
-func formatCardFields(
-	renderer *lipgloss.Renderer,
-	fields []cardField,
-) string {
+// The card width is fixed in the current terminal layout. Each field is
+// constrained before styling, so ANSI color sequences cannot corrupt widths.
+const collectorCardWidth = 72
+const collectorCardContentWidth = collectorCardWidth - 4 // border and padding
+
+func formatCardFields(renderer *lipgloss.Renderer, fields []cardField) string {
 	if len(fields) == 0 {
 		return ""
 	}
-
 	labelWidth := 0
-
 	for _, field := range fields {
 		if len(field.Label) > labelWidth {
 			labelWidth = len(field.Label)
 		}
 	}
-
-	labelStyle := renderer.NewStyle().
-		Foreground(ui.Muted)
-
-	valueStyle := renderer.NewStyle().
-		Foreground(ui.Accent)
-
+	labelStyle := renderer.NewStyle().Foreground(ui.Muted)
+	valueStyle := renderer.NewStyle().Foreground(ui.Accent)
 	var body strings.Builder
-
 	for i, field := range fields {
-		if i > 0 {
-			body.WriteString("\n")
+		if i != 0 {
+			body.WriteByte('\n')
 		}
-
-		label := fmt.Sprintf(
-			"%-*s",
-			labelWidth,
-			field.Label,
-		)
-
-		lines := strings.Split(
-			field.Value,
-			"\n",
-		)
-
-		body.WriteString(
-			labelStyle.Render(label + " : "),
-		)
-
-		if len(lines) > 0 {
-			body.WriteString(
-				valueStyle.Render(lines[0]),
-			)
+		label := fmt.Sprintf("%-*s : ", labelWidth, field.Label)
+		width := collectorCardContentWidth - lipgloss.Width(label)
+		if width < 12 {
+			width = 12
 		}
-
-		for _, line := range lines[1:] {
-			body.WriteString("\n")
-
-			body.WriteString(
-				strings.Repeat(
-					" ",
-					labelWidth+3,
-				),
-			)
-
-			body.WriteString(
-				valueStyle.Render(line),
-			)
+		lines := strings.Split(field.Value, "\n")
+		for j, line := range lines {
+			if j == 0 {
+				body.WriteString(labelStyle.Render(label))
+			} else {
+				body.WriteByte('\n')
+				body.WriteString(strings.Repeat(" ", lipgloss.Width(label)))
+			}
+			// Structured multi-line values must never wrap outside their
+			// allocated width; the raw value remains in SQLite and verbose.
+			if field.Label == "Effects" || field.Label == "Resource" || field.Label == "Deployment" || field.Label == "Pod" || field.Label == "Container" || field.Label == "Service" {
+				line = ellipsizeMiddle(line, width)
+				body.WriteString(valueStyle.Render(line))
+				continue
+			}
+			wrapped := wrapFieldLine(line, width)
+			for k, part := range wrapped {
+				if k > 0 {
+					body.WriteByte('\n')
+					body.WriteString(strings.Repeat(" ", lipgloss.Width(label)))
+				}
+				body.WriteString(valueStyle.Render(part))
+			}
 		}
 	}
-
 	return body.String()
+}
+
+// Middle ellipsis keeps unique suffixes of Kubernetes-generated names.
+func ellipsizeMiddle(text string, width int) string {
+	if width < 2 {
+		return "…"
+	}
+	if lipgloss.Width(text) <= width {
+		return text
+	}
+	runes := []rune(text)
+	left, right := "", ""
+	for len(runes) > 0 && lipgloss.Width(left)+lipgloss.Width(right)+1 < width {
+		if len(runes) == 0 {
+			break
+		}
+		c := string(runes[0])
+		runes = runes[1:]
+		if lipgloss.Width(left)+lipgloss.Width(right)+lipgloss.Width(c)+1 > width {
+			break
+		}
+		left += c
+		if len(runes) == 0 {
+			break
+		}
+		c = string(runes[len(runes)-1])
+		runes = runes[:len(runes)-1]
+		if lipgloss.Width(left)+lipgloss.Width(right)+lipgloss.Width(c)+1 > width {
+			break
+		}
+		right = c + right
+	}
+	return left + "…" + right
+}
+
+// Commands wrap at whitespace where possible; no information is discarded.
+func wrapFieldLine(text string, width int) []string {
+	if lipgloss.Width(text) <= width {
+		return []string{text}
+	}
+	var result []string
+	remaining := text
+	for lipgloss.Width(remaining) > width {
+		chars := []rune(remaining)
+		cut, size, lastSpace := 0, 0, -1
+		for i, ch := range chars {
+			w := lipgloss.Width(string(ch))
+			if size+w > width {
+				break
+			}
+			size += w
+			cut = i + 1
+			if ch == ' ' {
+				lastSpace = i
+			}
+		}
+		if cut == 0 {
+			cut = 1
+		}
+		if lastSpace > 0 && lastSpace >= cut/2 {
+			cut = lastSpace + 1
+		}
+		result = append(result, strings.TrimRight(string(chars[:cut]), " "))
+		remaining = strings.TrimLeft(string(chars[cut:]), " ")
+	}
+	if remaining != "" {
+		result = append(result, remaining)
+	}
+	return result
 }
 
 func timelineCardFields(
@@ -222,7 +277,7 @@ func timelineCardFields(
 
 // Notes intentionally use a distinct simple card rather than a collector header.
 func printNoteCard(renderer *lipgloss.Renderer, event storage.TimelineEvent) {
-	style := renderer.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(ui.Note).Padding(0, 1).Width(62)
+	style := renderer.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(ui.Note).Padding(0, 1).Width(collectorCardWidth)
 	fmt.Printf("  %s  %s %s\n", renderer.NewStyle().Foreground(ui.Muted).Render(event.OccurredAt.Format("15:04:05")),
 		renderer.NewStyle().Foreground(ui.Note).Render("✎"), renderer.NewStyle().Foreground(ui.Note).Bold(true).Render("NOTE"))
 	card := style.Render(renderer.NewStyle().Foreground(ui.Accent).Render(event.Summary))
@@ -383,6 +438,19 @@ func normalizedTimelineEventType(event storage.TimelineEvent) string {
 		!strings.Contains(event.Summary, "ImagePullBackOff") {
 		return "state_change"
 	}
+	// Readiness improvements during rollout are not necessarily recovery
+	// from an incident. Keep the captured classifications unchanged.
+	if event.Source == "kubernetes" && event.EventType == "recovery" {
+		summary := formatTransitionArrow(event.Summary)
+		if event.ResourceType == "pod" && strings.Contains(summary, "Running ready 0/") &&
+			strings.Contains(summary, "→ Running ready 1/") {
+			return "state_change"
+		}
+		if (event.ResourceType == "deployment" || event.ResourceType == "statefulset" || event.ResourceType == "daemonset") &&
+			strings.Contains(summary, "ready 0 available 0 →") && strings.Contains(summary, "ready 1 available 1") {
+			return "state_change"
+		}
+	}
 	return event.EventType
 }
 
@@ -391,23 +459,48 @@ func printPrettyActivity(renderer *lipgloss.Renderer, activity displayActivity) 
 	switch activity.EventType {
 	case "failure":
 		color, symbol = ui.Failure, "✗"
-	case "recovery":
-		color, symbol = ui.Recovery, "✓"
-	case "apply":
+	case "recovery", "apply":
 		color, symbol = ui.Recovery, "✓"
 	}
 	fields := []cardField{{Label: displayResourceType(activity.ResourceType), Value: activity.Resource}}
-	var effects strings.Builder
-	for i, effect := range summarizeActivityEffects(activity.Effects) {
-		if i > 0 {
-			effects.WriteString("\n")
+	if activity.EventType == "apply" && activity.ResourceType == "namespace" {
+		result := summarizeKubernetesRollout(activity)
+		if result.Controllers > 0 {
+			fields = append(fields, cardField{Label: "Controllers", Value: fmt.Sprintf("%d/%d observed available", result.ControllersReady, result.Controllers)})
 		}
-		fmt.Fprintf(&effects, "%s: %s\n", displayResourceType(effect.ResourceType), effect.Resource)
-		for _, line := range formatActivityEffectLines(effect) {
-			fmt.Fprintf(&effects, "  %s\n", line)
+		if result.Pods > 0 {
+			fields = append(fields, cardField{Label: "Pods", Value: fmt.Sprintf("%d/%d observed ready", result.PodsReady, result.Pods)})
 		}
+		if !result.Last.IsZero() && activity.Command != nil {
+			fields = append(fields, cardField{Label: "Observed", Value: result.Last.Sub(activity.Command.StartedAt).Round(time.Second).String()})
+		}
+		// An apply command's exit code only confirms API acceptance; success
+		// here is restricted to the resource states observed by our collector.
+		status := "Partial observations"
+		if result.Controllers > 0 && result.Controllers == result.ControllersReady &&
+			(result.Pods == 0 || result.Pods == result.PodsReady) {
+			status = "All observed resources ready"
+		}
+		if result.Incidents > 0 {
+			fields = append(fields, cardField{Label: "Alerts", Value: fmt.Sprintf("%d observed failure transitions", result.Incidents)})
+			if status == "All observed resources ready" {
+				status = "Ready now; review alerts"
+			}
+		}
+		fields = append(fields, cardField{Label: "Status", Value: status})
+	} else {
+		var effects strings.Builder
+		for i, effect := range summarizeActivityEffects(activity.Effects) {
+			if i > 0 {
+				effects.WriteByte('\n')
+			}
+			fmt.Fprintf(&effects, "%s: %s\n", displayResourceType(effect.ResourceType), effect.Resource)
+			for _, line := range formatActivityEffectLines(effect) {
+				fmt.Fprintf(&effects, "  %s\n", line)
+			}
+		}
+		fields = append(fields, cardField{Label: "Effects", Value: strings.TrimSuffix(effects.String(), "\n")})
 	}
-	fields = append(fields, cardField{Label: "Effects", Value: strings.TrimSuffix(effects.String(), "\n")})
 	if activity.Command != nil {
 		fields = append(fields, cardField{Label: "Command", Value: activity.Command.Command})
 	}
