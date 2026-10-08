@@ -14,6 +14,9 @@ const (
 )
 
 func Classify(command string) Mode {
+	if !OutputAllowed(command) {
+		return ModeNone
+	}
 	fields := strings.Fields(command)
 
 	if len(fields) == 0 {
@@ -42,11 +45,9 @@ func Classify(command string) Mode {
 		"uname":
 		return ModeOutput
 
-	case "curl":
-		return ModeOutput
-
-	case "wget":
-		return classifyWget(fields)
+	case "curl", "wget":
+		// Arbitrary response bodies cannot be made safe by key-name redaction.
+		return ModeNone
 
 	case "git":
 		return classifyGit(fields)
@@ -97,13 +98,17 @@ func stripCommandPrefixes(fields []string) []string {
 }
 
 func classifyGit(fields []string) Mode {
+	// Patch flags expose file contents even when the verb is "log".
+	for _, field := range fields[1:] {
+		if field == "--cc" || field == "--full-diff" || strings.HasPrefix(field, "--patch") || (strings.HasPrefix(field, "-") && !strings.HasPrefix(field, "--") && strings.ContainsAny(field, "pc")) {
+			return ModeNone
+		}
+	}
 	subcommand := subcommand(fields)
 
 	switch subcommand {
 	case "status",
-		"diff",
 		"log",
-		"show",
 		"branch",
 		"rev-parse":
 		return ModeOutput
@@ -118,7 +123,6 @@ func classifyDocker(fields []string) Mode {
 
 	switch subcommand {
 	case "ps",
-		"inspect",
 		"stats",
 		"images",
 		"info":
@@ -153,7 +157,7 @@ func classifyDockerCompose(fields []string) Mode {
 			continue
 		}
 		switch fields[i] {
-		case "ps", "config":
+		case "ps":
 			return ModeOutput
 		case "logs":
 			return ModeBounded
@@ -181,7 +185,7 @@ func classifySystemctl(fields []string) Mode {
 }
 
 func classifyKubectl(fields []string) Mode {
-	subcommand := subcommand(fields)
+	subcommand := kubectlCaptureVerb(fields[1:])
 
 	switch subcommand {
 	case "get",
@@ -201,9 +205,7 @@ func classifyTerraform(fields []string) Mode {
 	subcommand := subcommand(fields)
 
 	switch subcommand {
-	case "show",
-		"output",
-		"validate",
+	case "validate",
 		"version":
 		return ModeOutput
 
@@ -226,8 +228,7 @@ func classifyTerraformState(fields []string) Mode {
 	}
 
 	switch fields[2] {
-	case "list",
-		"show":
+	case "list":
 		return ModeOutput
 
 	default:
@@ -248,21 +249,6 @@ func classifyIP(fields []string) Mode {
 	default:
 		return ModeNone
 	}
-}
-
-func classifyWget(fields []string) Mode {
-	for _, field := range fields[1:] {
-		if field == "-O" ||
-			field == "--output-document" ||
-			strings.HasPrefix(
-				field,
-				"--output-document=",
-			) {
-			return ModeNone
-		}
-	}
-
-	return ModeOutput
 }
 
 func subcommand(fields []string) string {

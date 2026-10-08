@@ -16,7 +16,7 @@ func TestClassify(t *testing.T) {
 		{
 			name:    "curl",
 			command: "curl --fail http://localhost:8080/health",
-			want:    ModeOutput,
+			want:    ModeNone,
 		},
 		{
 			name:    "grep",
@@ -36,7 +36,7 @@ func TestClassify(t *testing.T) {
 		{
 			name:    "git diff",
 			command: "git diff",
-			want:    ModeOutput,
+			want:    ModeNone,
 		},
 		{
 			name:    "git commit",
@@ -51,7 +51,7 @@ func TestClassify(t *testing.T) {
 		{
 			name:    "docker inspect",
 			command: "docker inspect nginx",
-			want:    ModeOutput,
+			want:    ModeNone,
 		},
 		{
 			name:    "docker logs",
@@ -101,7 +101,7 @@ func TestClassify(t *testing.T) {
 		{
 			name:    "kubectl describe",
 			command: "kubectl describe pod api",
-			want:    ModeOutput,
+			want:    ModeNone,
 		},
 		{
 			name:    "kubectl logs",
@@ -116,7 +116,7 @@ func TestClassify(t *testing.T) {
 		{
 			name:    "terraform output",
 			command: "terraform output",
-			want:    ModeOutput,
+			want:    ModeNone,
 		},
 		{
 			name:    "terraform apply",
@@ -141,7 +141,7 @@ func TestClassify(t *testing.T) {
 		{
 			name:    "terraform state show",
 			command: "terraform state show aws_instance.web",
-			want:    ModeOutput,
+			want:    ModeNone,
 		},
 		{
 			name:    "tofu plan",
@@ -166,7 +166,7 @@ func TestClassify(t *testing.T) {
 		{
 			name:    "absolute curl path",
 			command: "/usr/bin/curl http://localhost",
-			want:    ModeOutput,
+			want:    ModeNone,
 		},
 		{
 			name:    "cd",

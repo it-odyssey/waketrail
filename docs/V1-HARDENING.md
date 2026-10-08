@@ -1,10 +1,3 @@
-Yes. I’d make this file the **authoritative release-hardening checklist**, not a dump of every idea Claude found. The review has a lot of good material, but some of it is clearly post-v1 architecture work. The highest-confidence release blockers are the redaction gaps, secret-prone capture, truncation behavior, unbounded output capture, and file permissions. :chatgpt-content-reference{index="0"}
-
-I’d also explicitly track the VS Code hook issue we just discovered, the Terraform failure/no-change cases, and the Git review we already decided belongs before release. Claude’s review independently called out hook coexistence/correctness, Git subprocess behavior, collector blind spots, and the duplicated timeline pipeline. :chatgpt-content-reference{index="1"} :chatgpt-content-reference{index="2"}
-
-Paste this into `docs/V1-HARDENING.md`:
-
-```markdown
 # WakeTrail v1 Hardening
 
 This document tracks correctness, trust, reliability, compatibility,
@@ -37,10 +30,13 @@ Priority:
 
 ## Release Blockers
 
-### [ ] Expand secret redaction coverage
+### [x] Expand secret redaction coverage
 
-Current redaction does not reliably cover several common DevOps secret
-formats.
+Implemented best-effort new-write redaction for the common formats below.
+The SQLite write boundary also sanitizes command, output, and timeline text;
+manual note confirmations use redacted text. Synthetic persistence tests verify
+that denied output is not read and common secrets do not reach new rows.
+Existing recordings are not rewritten. See `docs/SECURITY-PRIVACY.md`.
 
 Test and support at minimum:
 
@@ -66,28 +62,29 @@ Requirements:
 
 ---
 
-### [ ] Add capture deny rules for secret-prone commands
+### [x] Add capture deny rules for secret-prone commands
 
-Some commands intentionally print data that cannot be safely handled by
-generic regex redaction.
+Implemented metadata-only capture for secret-prone inspection commands and
+arbitrary web response bodies. Classification is rechecked by the recorder,
+so stale hooks and direct `record --capture-mode output` calls cannot bypass it.
+Complex shell syntax also defaults to metadata-only. See the documented policy
+and regression matrix in `internal/capture/privacy_test.go`.
 
 Review and restrict output capture for:
 
 - `kubectl get secret`
 - Secret resources emitted as YAML/JSON
-- `docker inspect`
+- `docker inspect` and `docker compose config`
 - `terraform output`
-- `terraform show`
+- `terraform show` and `terraform state show`
 - `git diff`
 - `git show`
-- sensitive `curl` responses
+- `curl` and `wget` responses
 
-Decide whether each command should:
-
-1. capture metadata only,
-2. capture a safe summary,
-3. require explicit opt-in for full output, or
-4. never capture output.
+Current policy is metadata only for these commands, with no full-output
+opt-in in this milestone. Ordinary Docker/Compose status tables and known
+Kubernetes inventory tables remain eligible for capture; raw Kubernetes object
+specs, descriptions, and custom output formats do not.
 
 ---
 
@@ -276,7 +273,7 @@ Check for:
 
 ---
 
-### [ ] Review heredoc command capture
+### [x] Review heredoc command capture
 
 WakeTrail records the shell command text. A heredoc used to create or modify a
 file can therefore place the heredoc body directly into command history.
@@ -289,9 +286,11 @@ cat > config.yaml <<'EOF'
 EOF
 ```
 
-Decide whether v1 should redact, summarize, or explicitly warn about multiline
-heredoc bodies. Treat this as a privacy concern because configuration content may
-contain credentials or other sensitive material.
+Implemented conservative body omission before persistence: multiline commands
+retain the redacted first invocation line plus an omission marker. Heredocs and
+here-strings retain the invocation prefix before `<<` plus a body-omission marker.
+Body contents are not persisted. This is deliberately not a shell parser;
+quoted occurrences of `<<` may also be conservatively omitted.
 
 ---
 
@@ -475,9 +474,13 @@ Test:
 
 ---
 
-### [ ] Decide what constitutes a semantic Git event
+### [x] Decide what constitutes a semantic Git event
 
-Candidate meaningful events:
+Semantic Git upgrade is implemented and smoke-tested. Covered events include
+COMMIT, BRANCH SWITCH, HEAD CHANGED, FILES CHANGED, and WORKING TREE. Edge-case
+and performance verification remain under their separate checklist items.
+
+Original review candidates:
 
 - commit created
 - branch switched
@@ -494,18 +497,12 @@ Raw Git context may remain available for forensic/verbose use.
 
 ---
 
-### [ ] Review changed-file reporting
+### [x] Review changed-file reporting
 
 WakeTrail documentation has referenced changed files.
 
-Determine whether v1 should capture:
-
-- filenames only,
-- status per file,
-- insert/delete counts,
-- or defer detailed file changes.
-
-Avoid storing sensitive diff contents by default.
+Git snapshots retain filenames and file status metadata. Diff contents are not
+stored by default; output capture now excludes diff/show and log patch flags.
 
 ---
 
@@ -527,7 +524,7 @@ Evaluate correlation for:
 
 ---
 
-### [ ] Review Docker Compose grouping
+### [x] Review Docker Compose grouping
 
 One Compose command may affect many containers.
 
@@ -543,9 +540,9 @@ first and last observed state. Unchanged rows are omitted, and verbose retains
 raw per-container events. A removal-only observation does not establish the
 prior running/health state, so those transitions are omitted rather than guessed.
 
-Pending: review the corrected installed CLI against the existing live Compose
-session before committing this milestone. Keep remaining grouping edge cases
-within the v1 hardening review.
+Verified against the installed CLI and live `compose-smoke-2` session in normal
+and verbose views. Docker/Compose milestone committed and pushed by Jeff.
+Remaining correlation edge cases stay within the separate v1 review.
 
 ---
 
@@ -572,30 +569,11 @@ Do not attempt speculative correlation merely to increase coverage.
 
 ---
 
-### [ ] Decide whether to create `internal/timeline`
+### [x] Share timeline reconstruction between show and export
 
-`show` and export currently build similar presentation pipelines.
-
-Before adding:
-
-- retro sessions,
-- incident reports,
-- additional export formats,
-- widget data feeds,
-
-evaluate extracting a shared timeline/activity model.
-
-Goal:
-
-```text
-storage
-  ↓
-timeline model
-  ↓
-terminal / Markdown / HTML / JSON / widget
-```
-
-Avoid a large refactor unless it clearly reduces upcoming duplication.
+Both consume the shared semantic pipeline in `cmd/timeline.go` and activity data.
+`card.go` owns the shared activity field grammar for terminal and Markdown.
+Keeping this model in `cmd` is sufficient for v1; no package migration is required.
 
 ---
 
@@ -603,9 +581,11 @@ Avoid a large refactor unless it clearly reduces upcoming duplication.
 
 ## Important
 
-### [ ] Define one card layout contract
+### [x] Define one card layout contract
 
-All collectors should visually belong to the same product.
+Shared card grammar is implemented in `cmd/card.go`, including Compose aggregate
+activities. Terminal and Markdown activity fields share the same builder.
+Full release-gallery verification remains its own checkpoint.
 
 Preferred hierarchy:
 
@@ -851,4 +831,3 @@ WakeTrail is ready to leave hardening when:
 - [ ] Collector cards use a consistent presentation grammar
 - [ ] README and user documentation match the actual product
 - [ ] A clean installation passes the end-to-end demo
-```

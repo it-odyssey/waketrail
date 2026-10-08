@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/it-odyssey/waketrail/internal/capture"
 	gitcollector "github.com/it-odyssey/waketrail/internal/collectors/git"
 	terraformcollector "github.com/it-odyssey/waketrail/internal/collectors/terraform"
 	"github.com/it-odyssey/waketrail/internal/redact"
@@ -57,12 +58,13 @@ var recordCmd = &cobra.Command{
 			sessionID = &session.ID
 		}
 
+		captureMode := capture.RecordingMode(args[0], recordCaptureMode)
 		event := storage.CommandEvent{
 			SessionID:   sessionID,
-			Command:     redact.String(args[0]),
+			Command:     redact.Command(args[0]),
 			Cwd:         recordCwd,
 			ExitCode:    recordExitCode,
-			CaptureMode: recordCaptureMode,
+			CaptureMode: string(captureMode),
 			StartedAt:   time.Unix(0, recordStartedAt),
 			EndedAt:     time.Unix(0, recordEndedAt),
 		}
@@ -74,10 +76,10 @@ var recordCmd = &cobra.Command{
 
 		var commandOutput *storage.CommandOutput
 
-		if recordStdoutFile != "" || recordStderrFile != "" {
+		if captureMode != capture.ModeNone && (recordStdoutFile != "" || recordStderrFile != "") {
 			output, err := loadCommandOutput(
 				commandEventID,
-				recordCaptureMode,
+				string(captureMode),
 				recordStdoutFile,
 				recordStderrFile,
 			)

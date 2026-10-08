@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/it-odyssey/waketrail/internal/redact"
 	"github.com/it-odyssey/waketrail/internal/state"
 	"github.com/it-odyssey/waketrail/internal/storage"
 	"github.com/spf13/cobra"
@@ -40,7 +41,7 @@ var markCmd = &cobra.Command{
 			SessionID:  &session.ID,
 			EventType:  "note",
 			Source:     "user",
-			Summary:    args[0],
+			Summary:    redact.String(args[0]),
 			OccurredAt: time.Now(),
 		}
 
@@ -48,7 +49,7 @@ var markCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("Added note: %s\n", args[0])
+		fmt.Printf("Added note: %s\n", event.Summary)
 
 		return nil
 	},

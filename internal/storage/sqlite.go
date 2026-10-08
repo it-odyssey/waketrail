@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/it-odyssey/waketrail/internal/redact"
 	_ "modernc.org/sqlite"
 )
 
@@ -346,6 +347,8 @@ func (s *Store) EndSession(id int64, endedAt time.Time) error {
 }
 
 func (s *Store) InsertCommandEvent(event CommandEvent) (int64, error) {
+	// Enforce text sanitization at the write boundary for every producer.
+	event.Command = redact.Command(event.Command)
 	const query = `
 INSERT INTO command_events (
 	session_id,
@@ -403,6 +406,8 @@ VALUES (?, ?, ?, ?, ?);
 func (s *Store) InsertTimelineEvent(
 	event TimelineEvent,
 ) (int64, error) {
+	event.Summary = redact.String(event.Summary)
+	event.Resource = redact.String(event.Resource)
 	const query = `
 INSERT INTO timeline_events (
 	session_id,
@@ -434,6 +439,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?);
 }
 
 func (s *Store) InsertCommandOutput(output CommandOutput) error {
+	output.Stdout = redact.String(output.Stdout)
+	output.Stderr = redact.String(output.Stderr)
 	const query = `
 INSERT INTO command_output (
 	command_event_id,

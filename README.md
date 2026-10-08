@@ -117,9 +117,17 @@ waketrail watch <service>
 The Bash integration can detect interactive commands and capture their exit status.
 
 WakeTrail can selectively capture output from diagnostic commands such as
-`pwd`, `curl`, `git status`, `docker ps`, and similar inspection commands.
+`pwd`, `git status`, `docker ps`, `docker compose ps`, and ordinary Kubernetes
+inventory tables. Secret-prone inspections and arbitrary curl/wget response
+bodies retain command metadata without output capture.
 
 Potentially large output sources such as docker logs, journalctl, kubectl logs, and Terraform plans use bounded capture to avoid flooding the local event store. Session timelines display concise output previews while preserving the underlying captured evidence.
+
+New command text, captured output, and timeline text receive best-effort redaction
+before SQLite writes. Multiline command bodies are omitted. Redaction cannot
+recognize every secret and does not sanitize existing recordings. See
+[Security and Privacy](docs/SECURITY-PRIVACY.md) for the exact capture policy,
+recording behavior, storage location, and limitations.
 
 WakeTrail is continuing to expand environment correlation, automated state monitoring, redaction, and report generation.
 
