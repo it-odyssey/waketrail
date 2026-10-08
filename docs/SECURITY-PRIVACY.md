@@ -29,8 +29,14 @@ rechecks classification before reading supplied output files; requesting
 `--capture-mode output` does not override a denial. There is no full-output
 opt-in for denied commands in this milestone.
 
-The syntax guard is intentionally conservative and does not implement a shell
-parser. Shell operators inside quoted strings may also disable capture. Commands
+The Bash hook uses a fresh interactive history entry to classify the whole
+submitted line, since DEBUG alone exposes pipeline/list fragments. When history
+is disabled, ignored, or unchanged (including duplicates suppressed by
+HISTCONTROL), output falls back to metadata only. In that fallback, command text
+can reflect the DEBUG fragment rather than a full compound line. Shell history
+settings are not changed. The syntax guard is intentionally conservative and
+does not implement a shell parser. Shell operators inside quoted strings may
+also disable capture. Commands
 with unrecognized wrappers/options can fall back to metadata only. Only known
 Kubernetes table resource types/options are accepted.
 
@@ -59,11 +65,10 @@ content. Capture restrictions reduce exposure rather than relying on regexes
 to make intentionally secret-bearing output safe.
 
 Original output byte counts describe the observed bytes before redaction, so
-stored text length may differ. Allowed captured output passes through temporary
-local files before sanitization; normal hook cleanup removes those files.
-Temporary files are created by `mktemp` with private permissions, but their size
-is not yet limited. Interrupted-shell cleanup and runtime-directory selection
-remain Bash hardening work.
+stored text length may differ. The updated Bash hook forwards live output through
+an internal streaming helper. Raw bytes stay in bounded process memory; only the
+sanitized capture and a small metadata header are written to temporary disk.
+Normal prompt/EXIT cleanup removes the command's private temporary directory.
 
 ## Output limits
 
@@ -79,17 +84,26 @@ byte counts and truncation flags remain available. Terraform plan/apply/destroy
 summaries near the end remain parseable. Truncated status tables are still
 excluded from inventory interpretation.
 
-Redaction context takes precedence over retaining a tail. For oversized capture
-files, bounded-memory overlapping windows inspect the full stream. If any window
-requires redaction, only the sanitized head is retained, with a marker explaining
-that the tail was withheld. This conservatively covers multiline private keys
+Redaction context takes precedence over retaining a tail. Bounded-memory
+overlapping windows inspect the stream while it is forwarded. Legacy plain
+capture files receive the same inspection in the recorder. If an oversized
+stream requires redaction, only the sanitized head is retained, with a marker
+explaining that the tail was withheld. This conservatively covers multiline
+private keys
 and YAML/JSON credentials whose headers may lie in the omitted middle. Small
 streams are sanitized in full. In-memory producers are sanitized before their
 head/tail sections are selected. Pattern detection is still best-effort.
 
-The limit bounds persisted output and recorder memory. The current Bash `tee`
-files can still grow until the command finishes, and inspection time scales with
-output size. Bounding transient capture files belongs to the Bash hardening slice.
+The limit bounds persisted output and capture/recorder working buffers. Each new
+stdout/stderr spool is capped at **65,566 bytes**: at most 64 KiB of sanitized text
+plus its 30-byte header. The spool is finalized at EOF; while a command is running,
+its sample stays in bounded memory. The helper still processes every live byte,
+so forwarding/redaction work scales with output size.
+
+Install the matching CLI before loading the updated hook. Then re-source
+`shell/bash/waketrail-hook.sh` or start a new configured shell. Already-loaded
+older hooks continue to use plain `tee` files until reloaded; the updated recorder
+can still read those files.
 
 ## Local recording and storage
 
@@ -114,3 +128,30 @@ file writes reject symlink destinations.
 
 An explicit retention/purge workflow and abnormal shell cleanup remain tracked
 in `V1-HARDENING.md`.
+
+## Temporary storage and shell cleanup
+
+The updated hook creates a private `0700` directory per command. It prefers
+`XDG_RUNTIME_DIR` when that directory is owned by the current user, writable, and
+has mode `0700`. Otherwise it uses `TMPDIR`, falling back to `/tmp`, via `mktemp -d`.
+Output spools and optional Git metadata snapshots use `0600`. No shared parent
+directory permissions are changed. Git snapshots retain metadata and filenames;
+the stdout/stderr spool limit does not redefine Git snapshot contents.
+
+At the next prompt, the hook restores stdout/stderr, waits for the stream helpers,
+records the result, and removes the temporary files/directory. Helpers survive
+Ctrl-C long enough to finalize output already observed; interrupted commands keep
+their exit code (normally 130). EXIT cleanup restores descriptors and removes
+capture files while preserving a previously installed EXIT handler and its
+original status. A pseudo-terminal hangup test also verifies cleanup through EXIT.
+Exiting before the next prompt cleans temporary data but does not create a final
+command row.
+
+SIGKILL and host crashes cannot run EXIT cleanup and may leave a private bounded
+spool/directory. There is no stale-directory sweeper in this slice. Background
+processes that inherit capture descriptors can delay EOF and the prompt's wait;
+background activity attribution and broader shell integration remain separate
+compatibility work. Fresh history makes compound lines metadata-only; repeated
+DEBUG events restore prior descriptors before replacing capture handles,
+preventing stacked capture files. This does not reconstruct per-command effects
+inside a compound line.

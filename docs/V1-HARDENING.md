@@ -92,8 +92,9 @@ specs, descriptions, and custom output formats do not.
 
 Both eligible modes and direct SQLite output producers now enforce 64 KiB per
 stream, including markers, and preserve original counts/truncation flags.
-Existing rows are unchanged. Temporary Bash capture files remain unbounded;
-that separate risk stays under temporary output storage review.
+Existing rows are unchanged. The updated Bash hook also caps each temporary
+stdout/stderr spool at 64 KiB plus a 30-byte metadata header; old loaded hooks
+need to be re-sourced after the matching CLI is installed.
 
 Requirements:
 
@@ -248,6 +249,12 @@ Test with:
 
 ### [?] Verify compound commands and pipelines
 
+The bounded-spool regression suite now verifies full submitted pipeline/list
+lines receive metadata-only capture through fresh interactive history. Disabled
+or ignored history also stays metadata-only. Cleanup smoke checks pass without
+stacked spools. Per-component attribution and the full command matrix below
+remain separate compatibility work, so this item is not marked complete.
+
 Explicitly test:
 
 ```bash
@@ -267,6 +274,11 @@ Verify:
 ---
 
 ### [?] Verify interrupted commands
+
+The bounded-spool slice verifies Ctrl-C with retained output/exit 130, normal
+EXIT during capture, and real pseudo-terminal hangup cleanup. SIGKILL/host crashes
+cannot run shell cleanup; background descriptor inheritance and nested-shell
+coverage remain outstanding, so this broader item is not marked complete.
 
 Test:
 
@@ -305,15 +317,21 @@ quoted occurrences of `<<` may also be conservatively omitted.
 
 ---
 
-### [ ] Review temporary output storage
+### [x] Review temporary output storage
 
-Prefer per-user runtime storage where possible rather than raw `/tmp`.
+Implemented private per-command directories, preferring an owned/writable 0700
+XDG_RUNTIME_DIR and falling back through TMPDIR to /tmp with mktemp -d. Spools
+are sanitized, capped, and carry original byte/truncation metadata. Runtime
+selection, fallback, capture failures, normal completion, source reload, EXIT
+handler coexistence, and interrupted evidence have regression coverage. Fresh
+interactive history closes the DEBUG-fragment bypass for pipeline/list capture;
+disabled/ignored/stale history conservatively keeps metadata only.
 
-Investigate:
-
-- `$XDG_RUNTIME_DIR`
-- cleanup after abnormal shell termination
-- secure temp-file permissions
+Real pseudo-terminal Ctrl-C and terminal-hangup checks passed. EXIT cleanup
+preserves the previous handler/status and removes private temporary data.
+SIGKILL/host crashes can leave private bounded files; there is no stale-directory
+sweeper. Background descriptor inheritance and complete compound attribution
+remain separate compatibility items. See SECURITY-PRIVACY.md.
 
 ---
 

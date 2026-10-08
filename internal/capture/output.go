@@ -76,6 +76,9 @@ func ReadOutput(path string) (string, int64, bool, error) {
 		return "", 0, false, fmt.Errorf("capture input must be a regular file: %s", path)
 	}
 	total := info.Size()
+	if text, bytes, truncated, matched, err := readSpool(file, total); matched {
+		return text, bytes, truncated, err
+	}
 	if total <= OutputLimit {
 		// LimitReader also bounds reads if another process grows the file.
 		data, err := io.ReadAll(io.LimitReader(file, OutputLimit))

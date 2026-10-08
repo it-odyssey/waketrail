@@ -203,14 +203,10 @@ func timelineCardFields(
 	resource := timelineResourceName(event)
 	summary := timelineDisplaySummary(event)
 	composeProject, composeService := "", ""
+
 	if event.Source == "docker" {
 		summary, composeProject, composeService = dockerEffectSummary(summary)
-	}
-	if event.Source == "docker" {
-		resourcePrefix := resource + " "
-		if strings.HasPrefix(summary, resourcePrefix) {
-			summary = strings.TrimPrefix(summary, resourcePrefix)
-		}
+		summary = strings.TrimPrefix(summary, resource+" ")
 	}
 
 	var fields []cardField
