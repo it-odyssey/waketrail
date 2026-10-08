@@ -88,9 +88,12 @@ specs, descriptions, and custom output formats do not.
 
 ---
 
-### [ ] Cap all captured output
+### [x] Cap all persisted command output
 
-No capture mode should allow unlimited output into SQLite.
+Both eligible modes and direct SQLite output producers now enforce 64 KiB per
+stream, including markers, and preserve original counts/truncation flags.
+Existing rows are unchanged. Temporary Bash capture files remain unbounded;
+that separate risk stays under temporary output storage review.
 
 Requirements:
 
@@ -101,19 +104,22 @@ Requirements:
 
 ---
 
-### [ ] Replace head-only truncation with head + tail capture
+### [x] Replace head-only truncation with head + tail capture
 
-Current bounded capture keeps the beginning of output and discards the
-end.
+Oversized ordinary output now retains roughly 16 KiB of head and 48 KiB of tail,
+with complete boundary lines and an explicit omission marker. Oversized capture
+files requiring redaction conservatively withhold the tail to avoid exposing
+multiline secret fragments. Terraform plan/apply/destroy tail summaries pass
+regression tests. See `docs/SECURITY-PRIVACY.md` for the privacy exception.
 
-This can remove the most important forensic information, including:
+The previous head-only behavior could remove important forensic information, including:
 
 - Terraform `Plan:` summaries
 - Terraform `Apply complete!`
 - recent log lines
 - final error messages
 
-Desired behavior:
+Implemented behavior:
 
 - preserve a useful head section,
 - preserve a larger tail section,
@@ -123,9 +129,14 @@ Terraform semantic parsing must still work on truncated output.
 
 ---
 
-### [ ] Lock down WakeTrail state permissions
+### [x] Lock down WakeTrail state permissions
 
-WakeTrail records command history and captured output.
+WakeTrail now enforces 0700 on its own state directory and 0600 on the database,
+state JSON, snapshots, and watcher log. Existing files are tightened on state
+access. SQLite's active rollback journal is verified as private. New and
+explicitly overwritten exports are private; arbitrary past exports are untouched.
+The watcher log now respects XDG_STATE_HOME. Parent state permissions are not
+changed. These paths and limitations are documented in SECURITY-PRIVACY.md.
 
 Requirements:
 

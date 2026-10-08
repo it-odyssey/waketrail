@@ -3,12 +3,12 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
 
+	"github.com/it-odyssey/waketrail/internal/localdata"
 	"github.com/it-odyssey/waketrail/internal/storage"
 	"github.com/spf13/cobra"
 )
@@ -81,10 +81,9 @@ var exportCmd = &cobra.Command{
 			) + ".md"
 		}
 
-		if err := os.WriteFile(
+		if err := localdata.WritePrivate(
 			outputPath,
 			[]byte(content),
-			0600,
 		); err != nil {
 			return err
 		}

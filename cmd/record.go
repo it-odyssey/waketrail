@@ -79,7 +79,6 @@ var recordCmd = &cobra.Command{
 		if captureMode != capture.ModeNone && (recordStdoutFile != "" || recordStderrFile != "") {
 			output, err := loadCommandOutput(
 				commandEventID,
-				string(captureMode),
 				recordStdoutFile,
 				recordStderrFile,
 			)
@@ -155,91 +154,23 @@ var recordCmd = &cobra.Command{
 	},
 }
 
-func readCapturedFile(
-	path string,
-	maxBytes int64,
-) (string, int64, bool, error) {
-	if path == "" {
-		return "", 0, false, nil
-	}
-
-	info, err := os.Stat(path)
-	if err != nil {
-		return "", 0, false, err
-	}
-
-	totalBytes := info.Size()
-	truncated := false
-
-	if maxBytes > 0 && totalBytes > maxBytes {
-		file, err := os.Open(path)
-		if err != nil {
-			return "", 0, false, err
-		}
-		defer file.Close()
-
-		data := make([]byte, maxBytes)
-
-		n, err := file.Read(data)
-		if err != nil {
-			return "", 0, false, err
-		}
-
-		data = data[:n]
-		truncated = true
-
-		return string(data), totalBytes, truncated, nil
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", 0, false, err
-	}
-
-	return string(data), totalBytes, truncated, nil
-}
-
-func loadCommandOutput(
-	commandEventID int64,
-	captureMode string,
-	stdoutPath string,
-	stderrPath string,
-) (storage.CommandOutput, error) {
-	const boundedLimit int64 = 64 * 1024
-
-	var maxBytes int64
-
-	if captureMode == "bounded" {
-		maxBytes = boundedLimit
-	}
-
-	stdout, stdoutBytes, stdoutTruncated, err := readCapturedFile(
-		stdoutPath,
-		maxBytes,
-	)
+func loadCommandOutput(commandEventID int64, stdoutPath, stderrPath string) (storage.CommandOutput, error) {
+	// Every eligible mode has the same hard cap. Classification still controls
+	// eligibility; callers cannot opt into unlimited recording.
+	stdout, stdoutBytes, stdoutTruncated, err := capture.ReadOutput(stdoutPath)
 	if err != nil {
 		return storage.CommandOutput{}, err
 	}
-
-	stderr, stderrBytes, stderrTruncated, err := readCapturedFile(
-		stderrPath,
-		maxBytes,
-	)
+	stderr, stderrBytes, stderrTruncated, err := capture.ReadOutput(stderrPath)
 	if err != nil {
 		return storage.CommandOutput{}, err
 	}
-
-	output := storage.CommandOutput{
-		CommandEventID:  commandEventID,
-		Stdout:          redact.String(stdout),
-		Stderr:          redact.String(stderr),
-		StdoutBytes:     stdoutBytes,
-		StderrBytes:     stderrBytes,
-		StdoutTruncated: stdoutTruncated,
-		StderrTruncated: stderrTruncated,
-	}
-
-	return output, nil
+	return storage.CommandOutput{
+		CommandEventID: commandEventID,
+		Stdout:         stdout, Stderr: stderr,
+		StdoutBytes: stdoutBytes, StderrBytes: stderrBytes,
+		StdoutTruncated: stdoutTruncated, StderrTruncated: stderrTruncated,
+	}, nil
 }
 
 func terraformTimelineEvent(

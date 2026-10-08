@@ -2,9 +2,9 @@ package cmd
 
 import (
 	"encoding/json"
-	"os"
 
 	gitcollector "github.com/it-odyssey/waketrail/internal/collectors/git"
+	"github.com/it-odyssey/waketrail/internal/localdata"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +23,7 @@ var gitSnapshotCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(output, data, 0600)
+		return localdata.WritePrivate(output, data)
 	},
 }
 

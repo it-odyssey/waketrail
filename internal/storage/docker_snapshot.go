@@ -6,37 +6,15 @@ import (
 	"path/filepath"
 
 	dockercollector "github.com/it-odyssey/waketrail/internal/collectors/docker"
+	"github.com/it-odyssey/waketrail/internal/localdata"
 )
 
 func dockerSnapshotPath() (string, error) {
-	stateHome := os.Getenv("XDG_STATE_HOME")
-
-	if stateHome == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-
-		stateHome = filepath.Join(
-			home,
-			".local",
-			"state",
-		)
-	}
-
-	dir := filepath.Join(
-		stateHome,
-		"waketrail",
-	)
-
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	dir, err := localdata.Directory()
+	if err != nil {
 		return "", err
 	}
-
-	return filepath.Join(
-		dir,
-		"docker-snapshot.json",
-	), nil
+	return filepath.Join(dir, "docker-snapshot.json"), nil
 }
 
 func SaveDockerSnapshot(
@@ -56,11 +34,7 @@ func SaveDockerSnapshot(
 		return err
 	}
 
-	return os.WriteFile(
-		path,
-		data,
-		0644,
-	)
+	return localdata.WritePrivate(path, data)
 }
 
 func LoadDockerSnapshot() (

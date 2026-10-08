@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/it-odyssey/waketrail/internal/localdata"
 )
 
 type Session struct {
@@ -14,23 +16,10 @@ type Session struct {
 }
 
 func statePath() (string, error) {
-	stateHome := os.Getenv("XDG_STATE_HOME")
-
-	if stateHome == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-
-		stateHome = filepath.Join(home, ".local", "state")
-	}
-
-	dir := filepath.Join(stateHome, "waketrail")
-
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	dir, err := localdata.Directory()
+	if err != nil {
 		return "", err
 	}
-
 	return filepath.Join(dir, "active-session.json"), nil
 }
 
@@ -45,7 +34,7 @@ func SaveSession(session Session) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return localdata.WritePrivate(path, data)
 }
 
 func LoadSession() (Session, error) {

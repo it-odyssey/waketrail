@@ -14,6 +14,7 @@ import (
 	dockercollector "github.com/it-odyssey/waketrail/internal/collectors/docker"
 	kubernetescollector "github.com/it-odyssey/waketrail/internal/collectors/kubernetes"
 	systemdcollector "github.com/it-odyssey/waketrail/internal/collectors/systemd"
+	"github.com/it-odyssey/waketrail/internal/localdata"
 	"github.com/it-odyssey/waketrail/internal/state"
 	"github.com/it-odyssey/waketrail/internal/storage"
 	watchengine "github.com/it-odyssey/waketrail/internal/watch"
@@ -248,19 +249,8 @@ func startDetachedWatch(
 		args...,
 	)
 
-	home, err := os.UserHomeDir()
+	logDir, err := localdata.Directory()
 	if err != nil {
-		return err
-	}
-
-	logDir := filepath.Join(
-		home,
-		".local",
-		"state",
-		"waketrail",
-	)
-
-	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return err
 	}
 
@@ -269,10 +259,9 @@ func startDetachedWatch(
 		"watch.log",
 	)
 
-	logFile, err := os.OpenFile(
+	logFile, err := localdata.OpenPrivate(
 		logPath,
 		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
-		0644,
 	)
 	if err != nil {
 		return err

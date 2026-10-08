@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/it-odyssey/waketrail/internal/capture"
+	"github.com/it-odyssey/waketrail/internal/localdata"
 	"github.com/it-odyssey/waketrail/internal/redact"
 	_ "modernc.org/sqlite"
 )
@@ -61,30 +63,21 @@ type Store struct {
 	db *sql.DB
 }
 
-func stateHome() (string, error) {
-	if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
-		return filepath.Join(xdg, "waketrail"), nil
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-
-	return filepath.Join(home, ".local", "state", "waketrail"), nil
-}
-
 func Open() (*Store, error) {
-	dir, err := stateHome()
+	dir, err := localdata.Directory()
 	if err != nil {
-		return nil, err
-	}
-
-	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
 
 	dbPath := filepath.Join(dir, "waketrail.db")
+	// Pre-create the database privately so SQLite journals inherit its mode.
+	file, err := localdata.OpenPrivate(dbPath, os.O_CREATE|os.O_RDWR)
+	if err != nil {
+		return nil, err
+	}
+	if err := file.Close(); err != nil {
+		return nil, err
+	}
 
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -439,8 +432,18 @@ VALUES (?, ?, ?, ?, ?, ?, ?);
 }
 
 func (s *Store) InsertCommandOutput(output CommandOutput) error {
-	output.Stdout = redact.String(output.Stdout)
-	output.Stderr = redact.String(output.Stderr)
+	// Enforce limits here too, so new producers cannot bypass recorder policy.
+	if output.StdoutBytes == 0 {
+		output.StdoutBytes = int64(len(output.Stdout))
+	}
+	if output.StderrBytes == 0 {
+		output.StderrBytes = int64(len(output.Stderr))
+	}
+	var stdoutShortened, stderrShortened bool
+	output.Stdout, stdoutShortened = capture.LimitOutput(output.Stdout)
+	output.Stderr, stderrShortened = capture.LimitOutput(output.Stderr)
+	output.StdoutTruncated = output.StdoutTruncated || stdoutShortened
+	output.StderrTruncated = output.StderrTruncated || stderrShortened
 	const query = `
 INSERT INTO command_output (
 	command_event_id,
