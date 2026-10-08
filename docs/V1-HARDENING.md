@@ -276,6 +276,25 @@ Check for:
 
 ---
 
+### [ ] Review heredoc command capture
+
+WakeTrail records the shell command text. A heredoc used to create or modify a
+file can therefore place the heredoc body directly into command history.
+
+Test and document behavior for commands such as:
+
+```bash
+cat > config.yaml <<'EOF'
+...
+EOF
+```
+
+Decide whether v1 should redact, summarize, or explicitly warn about multiline
+heredoc bodies. Treat this as a privacy concern because configuration content may
+contain credentials or other sensitive material.
+
+---
+
 ### [ ] Review temporary output storage
 
 Prefer per-user runtime storage where possible rather than raw `/tmp`.
@@ -512,8 +531,21 @@ Evaluate correlation for:
 
 One Compose command may affect many containers.
 
-Desired presentation should group related effects without losing raw
-forensic events.
+Compose up/down grouping and project attribution from actual Compose labels
+have passed live smoke tests. Activities now use the shared card fields for
+terminal output and Markdown export: Deployment, Effects, Scope, Command.
+
+Aggregate transitions cover only observed affected containers and distinct
+labelled services. Services means services with affected containers present,
+including stopped containers; it does not imply readiness or project inventory.
+Created/removed count unique affected containers; running/healthy compare the
+first and last observed state. Unchanged rows are omitted, and verbose retains
+raw per-container events. A removal-only observation does not establish the
+prior running/health state, so those transitions are omitted rather than guessed.
+
+Pending: review the corrected installed CLI against the existing live Compose
+session before committing this milestone. Keep remaining grouping edge cases
+within the v1 hardening review.
 
 ---
 

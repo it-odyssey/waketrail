@@ -129,7 +129,7 @@ func printReport(
 	for i, event := range events {
 		switch event.Kind {
 		case "command":
-			if !showVerbose && printPodObservation(renderer, store, *event.CommandEvent) {
+			if !showVerbose && (printPodObservation(renderer, store, *event.CommandEvent) || printDockerObservation(renderer, store, *event.CommandEvent)) {
 				break
 			}
 			printPrettyCommand(renderer, store, *event.CommandEvent)

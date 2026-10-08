@@ -20,6 +20,9 @@ func buildDisplayEvents(commands []storage.CommandEvent, timeline []storage.Time
 	sort.SliceStable(events, func(i, j int) bool { return events[i].OccurredAt.Before(events[j].OccurredAt) })
 	events = correlateLifecycleEvents(events)
 	if !verbose {
+		events = groupDockerActivities(events)
+	}
+	if !verbose {
 		events = correlateTerraformEvents(events)
 		events = correlateGitEvents(events)
 		events = groupKubernetesActivities(events)

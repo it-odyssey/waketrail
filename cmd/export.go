@@ -208,7 +208,7 @@ func buildMarkdownExport(
 	for _, event := range events {
 		switch event.Kind {
 		case "command":
-			if writeMarkdownPodObservation(&builder, store, *event.CommandEvent) {
+			if writeMarkdownPodObservation(&builder, store, *event.CommandEvent) || writeMarkdownDockerObservation(&builder, store, *event.CommandEvent) {
 				break
 			}
 			if err := writeMarkdownCommand(
@@ -347,26 +347,12 @@ func writeMarkdownCommand(
 func writeMarkdownActivity(builder *strings.Builder, activity displayActivity) {
 	label := strings.ToUpper(strings.ReplaceAll(activity.EventType, "_", " "))
 	fmt.Fprintf(builder, "### %s: %s\n\n", titleSource(activity.Source), label)
-	fmt.Fprintf(builder, "**%s:** `%s`  \n", displayResourceType(activity.ResourceType), activity.Resource)
-	if activity.EventType == "apply" && activity.ResourceType == "namespace" {
-		result := summarizeKubernetesRollout(activity)
-		fmt.Fprintf(builder, "\n- Controllers: %d/%d observed available\n", result.ControllersReady, result.Controllers)
-		fmt.Fprintf(builder, "- Pods: %d/%d observed ready\n", result.PodsReady, result.Pods)
-		if activity.Command != nil && !result.Last.IsZero() {
-			fmt.Fprintf(builder, "- Observation window: %s\n", result.Last.Sub(activity.Command.StartedAt).Round(time.Second))
+	for _, field := range activityCardFields(activity) {
+		if strings.Contains(field.Value, "\n") || field.Label == "Effects" {
+			fmt.Fprintf(builder, "**%s:**\n\n```text\n%s\n```\n\n", field.Label, field.Value)
+		} else {
+			fmt.Fprintf(builder, "**%s:** `%s`  \n", field.Label, field.Value)
 		}
-		builder.WriteString("\n*Counts reflect observed resources, not a cluster-wide inventory.*\n")
-	} else {
-		for _, effect := range summarizeActivityEffects(activity.Effects) {
-			fmt.Fprintf(builder, "\n**%s:** `%s`  \n", displayResourceType(effect.ResourceType), effect.Resource)
-			for _, line := range formatActivityEffectLines(effect) {
-				fmt.Fprintf(builder, "  \n    `%s`", line)
-			}
-			builder.WriteByte('\n')
-		}
-	}
-	if activity.Command != nil {
-		fmt.Fprintf(builder, "\n**Command:** `%s`\n", activity.Command.Command)
 	}
 	builder.WriteString("\n---\n\n")
 }
@@ -410,6 +396,10 @@ func writeMarkdownTimelineEvent(
 
 	resource := timelineResourceName(event)
 	summary := timelineDisplaySummary(event)
+	project, service := "", ""
+	if event.Source == "docker" {
+		summary, project, service = dockerEffectSummary(summary)
+	}
 
 	if resource != "" {
 		resourceLabel := resourceLabelForEvent(event)
@@ -429,6 +419,9 @@ func writeMarkdownTimelineEvent(
 		formatTransitionArrow(summary),
 	)
 
+	if project != "" {
+		fmt.Fprintf(builder, "&nbsp;&nbsp;&nbsp;&nbsp;**Compose:** `%s/%s`\n\n", project, service)
+	}
 	if command != nil {
 		fmt.Fprintf(
 			builder,
@@ -441,6 +434,9 @@ func writeMarkdownTimelineEvent(
 }
 
 func titleSource(source string) string {
+	if source == "docker compose" {
+		return "Docker Compose"
+	}
 	if source == "" {
 		return ""
 	}

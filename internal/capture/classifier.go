@@ -139,18 +139,29 @@ func classifyDockerCompose(fields []string) Mode {
 	if len(fields) < 3 {
 		return ModeNone
 	}
-
-	switch fields[2] {
-	case "ps",
-		"config":
-		return ModeOutput
-
-	case "logs":
-		return ModeBounded
-
-	default:
-		return ModeNone
+	for i := 2; i < len(fields); {
+		switch fields[i] {
+		case "-p", "--project-name", "-f", "--file", "--env-file", "--profile", "--project-directory":
+			if i+1 >= len(fields) {
+				return ModeNone
+			}
+			i += 2
+			continue
+		}
+		if strings.HasPrefix(fields[i], "-") {
+			i++
+			continue
+		}
+		switch fields[i] {
+		case "ps", "config":
+			return ModeOutput
+		case "logs":
+			return ModeBounded
+		default:
+			return ModeNone
+		}
 	}
+	return ModeNone
 }
 
 func classifySystemctl(fields []string) Mode {

@@ -202,6 +202,10 @@ func timelineCardFields(
 ) []cardField {
 	resource := timelineResourceName(event)
 	summary := timelineDisplaySummary(event)
+	composeProject, composeService := "", ""
+	if event.Source == "docker" {
+		summary, composeProject, composeService = dockerEffectSummary(summary)
+	}
 	if event.Source == "docker" {
 		resourcePrefix := resource + " "
 		if strings.HasPrefix(summary, resourcePrefix) {
@@ -266,6 +270,9 @@ func timelineCardFields(
 		)
 	}
 
+	if composeProject != "" {
+		fields = append(fields, cardField{Label: "Compose", Value: composeProject + "/" + composeService})
+	}
 	if command != nil {
 		fields = append(
 			fields,
@@ -494,6 +501,10 @@ func hasMisscheduled(summary string) bool {
 func printPrettyActivity(renderer *lipgloss.Renderer, activity displayActivity) {
 	color, symbol := ui.State, "↻"
 	switch activity.EventType {
+	case "created":
+		symbol = "+"
+	case "down", "stop", "rm":
+		color, symbol = ui.Muted, "■"
 	case "failure":
 		color, symbol = ui.Failure, "✗"
 	case "recovery":
@@ -506,6 +517,17 @@ func printPrettyActivity(renderer *lipgloss.Renderer, activity displayActivity) 
 			color, symbol = ui.State, "◇"
 		}
 	}
+	if activity.HasObservedFailure {
+		color, symbol = ui.Failure, "✗"
+	}
+
+	printCollectorCard(renderer, activity.OccurredAt, activity.Source,
+		strings.ToUpper(strings.ReplaceAll(activity.EventType, "_", " ")), color, symbol, activityCardFields(activity))
+}
+
+// activityCardFields owns the shared activity grammar for terminal and export.
+// Reconstruction supplies evidence and optional aggregate transitions only.
+func activityCardFields(activity displayActivity) []cardField {
 	fields := []cardField{{Label: displayResourceType(activity.ResourceType), Value: activity.Resource}}
 	if activity.EventType == "apply" && activity.ResourceType == "namespace" {
 		result := summarizeKubernetesRollout(activity)
@@ -533,6 +555,21 @@ func printPrettyActivity(renderer *lipgloss.Renderer, activity displayActivity) 
 		}
 		fields = append(fields, cardField{Label: "Status", Value: status})
 		fields = append(fields, cardField{Label: "Attribution", Value: "Namespace/time correlation"})
+	} else if len(activity.Transitions) > 0 {
+		var effects strings.Builder
+		width := 0
+		for _, transition := range activity.Transitions {
+			if len(transition.Name) > width {
+				width = len(transition.Name)
+			}
+		}
+		for i, transition := range activity.Transitions {
+			if i > 0 {
+				effects.WriteByte('\n')
+			}
+			fmt.Fprintf(&effects, "%-*s  %d → %d", width, transition.Name, transition.Before, transition.After)
+		}
+		fields = append(fields, cardField{Label: "Effects", Value: effects.String()})
 	} else {
 		var effects strings.Builder
 		for i, effect := range summarizeActivityEffects(activity.Effects) {
@@ -546,9 +583,11 @@ func printPrettyActivity(renderer *lipgloss.Renderer, activity displayActivity) 
 		}
 		fields = append(fields, cardField{Label: "Effects", Value: strings.TrimSuffix(effects.String(), "\n")})
 	}
+	if activity.EffectScope != "" {
+		fields = append(fields, cardField{Label: "Scope", Value: activity.EffectScope})
+	}
 	if activity.Command != nil {
 		fields = append(fields, cardField{Label: "Command", Value: activity.Command.Command})
 	}
-	printCollectorCard(renderer, activity.OccurredAt, activity.Source,
-		strings.ToUpper(strings.ReplaceAll(activity.EventType, "_", " ")), color, symbol, fields)
+	return fields
 }

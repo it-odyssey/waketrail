@@ -133,3 +133,11 @@ func TestParseDockerPSSkipsMalformedLines(t *testing.T) {
 		)
 	}
 }
+
+func TestParseDockerPSComposeMetadata(t *testing.T) {
+	input := []byte("web\trunning\tUp 2 seconds\tmonitoring\tfrontend\nplain\trunning\tUp 4 seconds\t\t\n")
+	got, err := parseDockerPS(input)
+	if err != nil || len(got) != 2 || got[0].ComposeProject != "monitoring" || got[0].ComposeService != "frontend" || got[1].ComposeProject != "" {
+		t.Fatalf("metadata parsing: %+v, %v", got, err)
+	}
+}

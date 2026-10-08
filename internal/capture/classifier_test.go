@@ -69,6 +69,11 @@ func TestClassify(t *testing.T) {
 			want:    ModeOutput,
 		},
 		{
+			name:    "docker compose named project ps",
+			command: "docker compose -p monitoring ps -a",
+			want:    ModeOutput,
+		},
+		{
 			name:    "docker compose logs",
 			command: "docker compose logs api",
 			want:    ModeBounded,

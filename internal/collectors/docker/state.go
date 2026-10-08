@@ -3,25 +3,31 @@ package docker
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type ContainerState struct {
-	Name   string
-	State  string
-	Status string
-	Health string
+	Name           string
+	State          string
+	Status         string
+	Health         string
+	ComposeProject string
+	ComposeService string
 }
 
 func Detect() ([]ContainerState, error) {
-	cmd := exec.Command(
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx,
 		"docker",
 		"ps",
 		"-a",
 		"--format",
-		"{{.Names}}\t{{.State}}\t{{.Status}}",
+		`{{.Names}}	{{.State}}	{{.Status}}	{{.Label "com.docker.compose.project"}}	{{.Label "com.docker.compose.service"}}`,
 	)
 
 	output, err := cmd.Output()
@@ -42,21 +48,33 @@ func parseDockerPS(output []byte) ([]ContainerState, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(output))
 
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+		line := strings.TrimSuffix(scanner.Text(), "\r")
 
-		if line == "" {
+		if strings.TrimSpace(line) == "" {
 			continue
 		}
 
-		fields := strings.SplitN(line, "\t", 3)
+		fields := strings.Split(line, "\t")
 
-		if len(fields) != 3 {
+		if len(fields) != 3 && len(fields) != 5 {
 			continue
 		}
 
 		status := fields[2]
 
+		project, service := "", ""
+		if len(fields) == 5 {
+			project = strings.TrimSpace(fields[3])
+			service = strings.TrimSpace(fields[4])
+			if project == "<no value>" || project == "<nil>" {
+				project = ""
+			}
+			if service == "<no value>" || service == "<nil>" {
+				service = ""
+			}
+		}
 		containers = append(containers, ContainerState{
+			ComposeProject: project, ComposeService: service,
 			Name:   fields[0],
 			State:  fields[1],
 			Status: status,

@@ -19,6 +19,17 @@ type displayActivity struct {
 	Resource     string
 	Command      *storage.CommandEvent
 	Effects      []storage.TimelineEvent
+	// Transitions are semantic aggregate effects, independent of card layout.
+	// Effects still holds the original per-resource evidence.
+	Transitions        []activityTransition
+	EffectScope        string
+	HasObservedFailure bool
+}
+
+type activityTransition struct {
+	Name   string
+	Before int
+	After  int
 }
 
 type kubernetesCommandTarget struct {
@@ -381,9 +392,12 @@ func summarizeActivityEffects(
 			"\x00" +
 			effect.Resource
 
-		summary := normalizeEffectSummary(
-			effect.Summary,
-		)
+		summary := effect.Summary
+		if effect.Source == "docker" {
+			summary, _, _ = dockerEffectSummary(timelineDisplaySummary(effect))
+			summary = strings.TrimPrefix(summary, effect.Resource+" ")
+		}
+		summary = normalizeEffectSummary(summary)
 
 		index, exists := indexByResource[key]
 		if !exists {

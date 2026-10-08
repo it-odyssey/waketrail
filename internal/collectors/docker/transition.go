@@ -40,11 +40,7 @@ func Compare(
 				Name:      name,
 				EventType: EventCreated,
 				Current:   currentState,
-				Summary: fmt.Sprintf(
-					"%s appeared: %s",
-					name,
-					describeState(currentState),
-				),
+				Summary:   composeSummary(fmt.Sprintf("%s appeared: %s", name, describeState(currentState)), currentState),
 			})
 
 			continue
@@ -64,12 +60,7 @@ func Compare(
 			EventType: eventType,
 			Previous:  previousState,
 			Current:   currentState,
-			Summary: fmt.Sprintf(
-				"%s: %s -> %s",
-				name,
-				describeState(previousState),
-				describeState(currentState),
-			),
+			Summary:   composeSummary(fmt.Sprintf("%s: %s -> %s", name, describeState(previousState), describeState(currentState)), currentState),
 		})
 	}
 
@@ -82,10 +73,7 @@ func Compare(
 			Name:      name,
 			EventType: EventRemoved,
 			Previous:  previousState,
-			Summary: fmt.Sprintf(
-				"%s disappeared",
-				name,
-			),
+			Summary:   composeSummary(name+" disappeared", previousState),
 		})
 	}
 
@@ -191,4 +179,13 @@ func describeState(container ContainerState) string {
 	}
 
 	return container.State
+}
+
+// composeSummary retains Compose identity on the timeline without a schema
+// migration. The suffix is metadata, not part of the human-readable effect.
+func composeSummary(summary string, state ContainerState) string {
+	if state.ComposeProject == "" || state.ComposeService == "" {
+		return summary
+	}
+	return summary + " [compose:" + state.ComposeProject + "/" + state.ComposeService + "]"
 }
